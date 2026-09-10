@@ -78,6 +78,47 @@ The default bridge is local-only. Set `TERRARIUM_ADDRESS` consistently for
 Electron and Go to change the address. Public assets are explicitly listed;
 repository files and the old webcam control endpoints are not served.
 
+## Spotify mood queue
+
+The optional Spotify controller chooses what to queue next from machine activity:
+
+| Mood | Trigger | Playlist role |
+| --- | --- | --- |
+| `calm` | Light CPU and network activity | Ambient, acoustic, or other quiet music |
+| `flow` | Moderate CPU or network activity | Focus music |
+| `busy` | CPU at least 45%, or network traffic at least 5 MiB/s | Energetic music |
+| `chaotic` | CPU at least 80%, or memory stalls at least 5% | Intense music |
+
+Copy `spotify.example.json` to
+`~/.config/digital-terrarium/spotify.json`, add the client ID from a Spotify
+developer app, and replace each placeholder with a playlist you own or
+collaborate on. In the Spotify app settings, register this exact redirect URI:
+
+```text
+http://127.0.0.1:8091/api/spotify/callback
+```
+
+Restart the terrarium, then open
+<http://127.0.0.1:8091/api/spotify/login> once to authorize it. The connector
+uses OAuth Authorization Code with PKCE and requests only playback state,
+playback control, and private-playlist read access. The refresh token is written
+to `~/.config/digital-terrarium/spotify-token.json` with mode `0600`; it is never
+served over HTTP. Inspect the controller without exposing credentials:
+
+```bash
+curl -fsS http://127.0.0.1:8091/api/spotify/status
+```
+
+Every 15 seconds, the controller reads the current Spotify playback state. When
+a playing track has 30 seconds or less remaining, it queues one track from the
+current mood playlist. It queues at most once for each current track and does
+nothing while playback is stopped. Mood selection uses machine telemetry only;
+the scene does not analyze audio or animate to Spotify content.
+
+Configuration may instead be supplied with `TERRARIUM_SPOTIFY_ENABLED=true`,
+`TERRARIUM_SPOTIFY_CLIENT_ID`, and comma-separated `TERRARIUM_SPOTIFY_CALM`, `TERRARIUM_SPOTIFY_FLOW`,
+`TERRARIUM_SPOTIFY_BUSY`, and `TERRARIUM_SPOTIFY_CHAOTIC` environment variables.
+
 Measurement reference: [Linux proc documentation](https://www.kernel.org/doc/html/latest/filesystems/proc.html).
 
 ## Verification
@@ -88,7 +129,8 @@ npm run test:scene
 ```
 
 The first command tests telemetry parsing, rate baselines, counter resets, PID
-reuse, group identity, unavailable data, and visual activity mappings. The scene
+reuse, group identity, unavailable data, visual activity mappings, and Spotify
+mood selection. The scene
 check starts an isolated real Go bridge and a hidden Electron window, verifies
 live telemetry, GPU active/idle movement, hover behavior, stale-data handling,
 and opaque wallpaper redraw. It writes a local preview to

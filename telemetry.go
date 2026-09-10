@@ -73,8 +73,13 @@ type collector struct {
 }
 
 func newCollector(root string, uid int) *collector { return &collector{root: root, uid: uid} }
-func number(s string) uint64                       { n, _ := strconv.ParseUint(s, 10, 64); return n }
-func point(n float64) *float64                     { return &n }
+func (c *collector) current() Ecosystem {
+	c.RLock()
+	defer c.RUnlock()
+	return c.snapshot
+}
+func number(s string) uint64   { n, _ := strconv.ParseUint(s, 10, 64); return n }
+func point(n float64) *float64 { return &n }
 func rate(current, previous uint64, seconds float64, valid bool) *float64 {
 	if !valid || seconds <= 0 || current < previous {
 		return nil

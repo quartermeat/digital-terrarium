@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -25,10 +26,17 @@ func main() {
 		}
 	}()
 	mux := http.NewServeMux()
+	spotify := newSpotifyController(collector.current)
+	spotifyContext, stopSpotify := context.WithCancel(context.Background())
+	defer stopSpotify()
+	go spotify.run(spotifyContext)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"app": "digital-terrarium", "telemetryVersion": 1})
 	})
 	mux.HandleFunc("/api/ecosystem", collector.serve)
+	mux.HandleFunc("/api/spotify/status", spotify.serveStatus)
+	mux.HandleFunc("/api/spotify/login", spotify.login)
+	mux.HandleFunc("/api/spotify/callback", spotify.callback)
 	mux.HandleFunc("/api/wallpaper", wallpaperHandler)
 	// Serve only public assets, never repository files or configuration.
 	for _, name := range []string{"terrarium.html", "terrarium.mjs", "ecology.mjs", "creature-compute.mjs", "creature-compute-gl.mjs", "creature-compute.vert", "creature-compute.wgsl"} {
