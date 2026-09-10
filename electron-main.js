@@ -2,7 +2,7 @@ const { app, BrowserWindow, session, screen, globalShortcut } = require('electro
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 
-const interfaceUrl = 'http://127.0.0.1:8090/';
+const interfaceUrl = 'http://' + (process.env.TERRARIUM_ADDRESS || '127.0.0.1:8091') + '/';
 let bridgeProcess;
 const terrarium = process.argv.includes('--terrarium');
 
@@ -17,9 +17,13 @@ app.on('gpu-info-update', () => {
 
 function bridgeIsRunning() {
   return new Promise(resolve => {
-    const request = http.get(interfaceUrl, response => {
-      response.resume();
-      resolve(response.statusCode === 200);
+    const request = http.get(interfaceUrl + 'api/health', response => {
+      let body = '';
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        try { const health = JSON.parse(body); resolve(health.app === 'digital-terrarium' && health.telemetryVersion === 1); }
+        catch { resolve(false); }
+      });
     });
     request.setTimeout(300, () => request.destroy());
     request.on('error', () => resolve(false));
