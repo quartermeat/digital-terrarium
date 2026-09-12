@@ -1,6 +1,6 @@
 {
   "name": "digital-terrarium",
-  "version": "1.3.8",
+  "version": "1.3.9",
   "description": "A GPU-assisted electronic aquarium beneath your desktop windows.",
   "main": "electron-main.js",
   "scripts": {

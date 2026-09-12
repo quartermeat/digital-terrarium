@@ -24,8 +24,8 @@ desktop_home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
 AGENTS = desktop_home / ".local/state/digital-terrarium/agents"
 SAFE = re.compile(r"[^a-zA-Z0-9_. /:@+-]")
 HOST_COMM = "claude"
-STALE_AFTER = 5
-WATCH_INTERVAL = 1.5
+IDLE_AFTER = 2.5
+WATCH_INTERVAL = 1
 
 
 def clean(value, limit=96):
@@ -132,12 +132,13 @@ def watch_forever(agent_path, host, agent_id):
             try:
                 current = json.loads(agent_path.read_text())
                 sampled = calendar.timegm(time.strptime(current["sampledAt"], "%Y-%m-%dT%H:%M:%SZ"))
-                stale = current.get("phase") not in ("idle", "waiting", "error") and time.time() - sampled > STALE_AFTER
+                stale = current.get("phase") not in ("idle", "waiting", "error") and time.time() - sampled > IDLE_AFTER
             except (OSError, ValueError, KeyError):
                 stale = True
-            # Only ever fills the gap after real activity has genuinely gone
-            # stale (or the file vanished unexpectedly) — never overwrites a
-            # fresh report, and never fabricates activity that isn't real.
+            # Takes over a short while after the last real report, staying
+            # inside the bridge's five-second freshness window so presence
+            # never blinks out between a report expiring and idle replacing
+            # it. Never overwrites a fresh report, never invents activity.
             if stale:
                 publish(agent_path, agent_id, "waiting", "ready for direction", {})
             time.sleep(WATCH_INTERVAL)
