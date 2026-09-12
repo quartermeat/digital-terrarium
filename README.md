@@ -196,10 +196,14 @@ intended for Codex wrappers, Ollama-backed workers, and future local agents; it
 does not require a particular agent framework.
 
 The user-level `~/.codex/hooks.json` sends supported Codex lifecycle events to
-`scripts/codex-activity-hook.py`. A detached, per-session heartbeat keeps each
-active Codex operator fresh without reading transcripts, prompts, command
-arguments, or tool results. It records only the documented lifecycle event,
-tool name, working directory or file target, and a hashed session identifier.
+`scripts/codex-activity-hook.py`; `~/.claude/settings.json` does the same for
+Claude Code via `scripts/claude-activity-hook.py`. Each hook invocation writes
+exactly one sampled report and exits — there is no background heartbeat
+process republishing a stale phase between events. A quiet agent simply ages
+past the five-second freshness window and disappears; nothing keeps it alive
+artificially. Reports never read transcripts, prompts, command arguments, or
+tool results — only the documented lifecycle event, tool name, working
+directory or file target, and a hashed session identifier.
 `~/.local/bin/codex` launches the installed CLI normally. If explicitly invoked
 through sudo by full path, it drops back to the desktop account rather than
 granting the entire agent permanent root authority; commands needing elevation

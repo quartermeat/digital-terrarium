@@ -1,3 +1,4 @@
 bin/
 node_modules/
 spotify-token.json
+__pycache__/

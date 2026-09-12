@@ -7,8 +7,6 @@ import os
 import pwd
 from pathlib import Path
 import re
-import signal
-import subprocess
 import sys
 import time
 
@@ -20,9 +18,7 @@ if os.geteuid() == 0 and owner.pw_uid != 0:
     os.setgid(owner.pw_gid)
     os.setuid(owner.pw_uid)
 desktop_home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
-ROOT = desktop_home / ".local/state/digital-terrarium"
-CONTROL = ROOT / "codex-controls"
-AGENTS = ROOT / "agents"
+AGENTS = desktop_home / ".local/state/digital-terrarium/agents"
 SAFE = re.compile(r"[^a-zA-Z0-9_. /:@+-]")
 
 
@@ -38,65 +34,23 @@ def atomic(path, value):
     temporary.replace(path)
 
 
-def paths(session_id):
+def agent_path_for(session_id):
     identity = hashlib.sha256(session_id.encode()).hexdigest()[:12]
-    return identity, CONTROL / f"{identity}.json", AGENTS / f"codex-{identity}.json", CONTROL / f"{identity}.pid"
+    return f"codex-{identity}", AGENTS / f"codex-{identity}.json"
 
 
-def publish(agent_path, control):
+def publish(agent_path, agent_id, phase, detail, target):
     activity = {
         "version": 1,
-        "id": control["id"],
+        "id": agent_id,
         "name": "Codex",
         "sampledAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "phase": control["phase"],
-        "detail": control["detail"],
+        "phase": phase,
+        "detail": detail,
     }
-    if control.get("target", {}).get("name"):
-        activity["target"] = control["target"]
+    if target.get("name"):
+        activity["target"] = target
     atomic(agent_path, activity)
-
-
-def heartbeat(control_path, agent_path, pid_path):
-    def stop(*_):
-        agent_path.unlink(missing_ok=True)
-        pid_path.unlink(missing_ok=True)
-        raise SystemExit
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
-    try:
-        while True:
-            try:
-                control = json.loads(control_path.read_text())
-            except (OSError, ValueError):
-                break
-            age = time.time() - control.get("updated", 0)
-            if age > (4 if control.get("terminal") else 1800):
-                break
-            publish(agent_path, control)
-            time.sleep(1)
-    finally:
-        agent_path.unlink(missing_ok=True)
-        control_path.unlink(missing_ok=True)
-        pid_path.unlink(missing_ok=True)
-
-
-def ensure_heartbeat(control_path, agent_path, pid_path):
-    try:
-        pid = int(pid_path.read_text())
-        os.kill(pid, 0)
-        return
-    except (OSError, ValueError):
-        pid_path.unlink(missing_ok=True)
-    process = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "--heartbeat", str(control_path), str(agent_path), str(pid_path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    atomic(pid_path, process.pid)
 
 
 def tool_target(event):
@@ -118,15 +72,14 @@ def tool_target(event):
 
 def handle(event):
     session_id = str(event.get("session_id") or "unknown")
-    identity, control_path, agent_path, pid_path = paths(session_id)
+    agent_id, agent_path = agent_path_for(session_id)
     name = event.get("hook_event_name", "")
     if name == "SessionEnd":
-        control_path.unlink(missing_ok=True)
         agent_path.unlink(missing_ok=True)
         return
-    phase, detail, target, terminal = "working", "active session", {}, False
+    phase, detail, target = "working", "active session", {}
     if name == "SessionStart":
-        phase, detail, terminal = "idle", "session ready", True
+        phase, detail = "idle", "session ready"
     elif name == "UserPromptSubmit":
         phase, detail = "thinking", "reasoning"
     elif name in ("PreToolUse", "PermissionRequest"):
@@ -141,21 +94,18 @@ def handle(event):
     elif name == "SubagentStop":
         phase, detail = "thinking", "reviewing subagent result"
     elif name == "Stop":
-        phase, detail, terminal = "waiting", "ready for direction", True
+        phase, detail = "waiting", "ready for direction"
     elif name == "Interrupt":
-        phase, detail, terminal = "waiting", "interrupted", True
-    control = {"id": f"codex-{identity}", "phase": phase, "detail": detail, "target": target, "terminal": terminal, "updated": time.time()}
-    atomic(control_path, control)
-    publish(agent_path, control)
-    ensure_heartbeat(control_path, agent_path, pid_path)
+        phase, detail = "waiting", "interrupted"
+    # No heartbeat: publish exactly what was sampled and let it age out (the
+    # bridge drops anything older than five seconds) rather than keeping a
+    # background process alive to keep republishing a stale phase.
+    publish(agent_path, agent_id, phase, detail, target)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[1] == "--heartbeat":
-        heartbeat(*(Path(value) for value in sys.argv[2:]))
-    else:
-        try:
-            handle(json.load(sys.stdin))
-        except Exception:
-            # Observability must never block or alter the agent operation.
-            pass
+    try:
+        handle(json.load(sys.stdin))
+    except Exception:
+        # Observability must never block or alter the agent operation.
+        pass
