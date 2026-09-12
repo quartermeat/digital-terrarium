@@ -49,14 +49,16 @@ app.whenReady().then(async () => {
  await window.webContents.executeJavaScript(`
   window.audioFetch=window.fetch; window.audioMode='playing';
   window.fetch=(url,opts)=>url==='/api/audio'
-   ? Promise.resolve(new Response(JSON.stringify({available:window.audioMode!=='offline',level:window.audioMode==='playing'?.7:0,bass:.4,waveform:Array(40).fill(.3)})))
+   ? Promise.resolve(new Response(JSON.stringify({available:window.audioMode!=='offline',level:window.audioMode==='playing'?.7:0,bass:window.audioMode==='playing'?.4:0,waveform:Array(40).fill(window.audioMode==='playing'?.3:0)})))
    : window.audioFetch(url,opts);
   undefined;
  `);
  await pause(700);
  assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicLevel"))>.5);
+ assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicAmplitude"))>25);
  await window.webContents.executeJavaScript("window.audioMode='silent'");await pause(700);
  assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicLevel"))<.02);
+ assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicAmplitude"))<1);
  await window.webContents.executeJavaScript("window.audioMode='offline'");await pause(700);
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.audioAvailable"),'false');
  await window.webContents.executeJavaScript("window.fetch=window.audioFetch;undefined");

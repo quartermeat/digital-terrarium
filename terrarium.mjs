@@ -99,23 +99,30 @@ function drawMemory(fresh, hits, dt) {
  const swapping=fresh?emissionRate((memory.swapInBytesPerSec??0)+(memory.swapOutBytesPerSec??0)):0;
  const agitation=pressure*25+swapping*.3;
  const sound = audio && performance.now()-audioReceived<500 ? audio : null;
- const ease = 1-Math.exp(-dt*18);
+ const ease = 1-Math.exp(-dt*24);
  musicLevel += ((sound?.level??0)-musicLevel)*ease;
  musicBass += ((sound?.bass??0)-musicBass)*ease;
- musicPhase += dt*(2+musicLevel*9);
+ musicPhase += dt*(2+musicLevel*12);
  musicWave.forEach((value,i)=>{musicWave[i]=value+((sound?.waveform[i]??0)-value)*ease;});
  canvas.dataset.audioAvailable=String(Boolean(sound));
  canvas.dataset.musicLevel=musicLevel.toFixed(3);
+ // Compress the measured level so normal listening volumes visibly move the well.
+ const energy=Math.pow(Math.max(0,musicLevel-.008),.55);
+ const bass=Math.pow(Math.max(0,musicBass-.008),.6);
+ const amplitude=ry*(energy*.7+bass*.55);
+ canvas.dataset.musicAmplitude=amplitude.toFixed(2);
  ctx.save();ctx.clip();
+ ctx.shadowColor='#91ffe5';ctx.shadowBlur=energy*14;
  for(let j=0;j<7;j++) {
   const points=musicWave.map((sample,i)=>{
    const p=i/(musicWave.length-1), envelope=Math.sin(p*Math.PI);
-   const ripple=Math.sin(p*12-musicPhase+j*.65)*musicBass*ry*.42;
+   const ripple=Math.sin(p*10-musicPhase+j*.65)*amplitude;
    return [x-rx+p*rx*2,y-ry+j*ry/3+Math.sin(i*.6+time*(.5+agitation)+j)*(1+agitation)
-    +envelope*(sample*ry*.55+ripple)];
+    +envelope*(sample*ry*.8+ripple)];
   });
-  line(points,color, .7+musicLevel*.8);
+  line(points,energy>.05?'hsl(165 85% '+(65+energy*25)+'%)':color, .7+energy*2);
  }
+ ctx.shadowBlur=0;
  // Fill represents RAM; waves combine memory pressure with measured speaker audio.
  if(fresh&&measured(memory.used)) {ctx.fillStyle=color;ctx.globalAlpha=.14;ctx.fillRect(x-rx,y+ry-2*ry*memory.used,2*rx,2*ry*memory.used);}
  ctx.restore();
