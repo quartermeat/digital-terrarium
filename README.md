@@ -284,9 +284,10 @@ a `vision` event on `/api/stream` beside `ecosystem`, `agents`, and `audio`.
   wireframe, which is painted in the same corrected camera space that drove the
   physics, so what you see shoving the habitat is exactly what moved it.
 - **Your face** appears as a 136-point wireframe once it fills more than a
-  quarter of the camera's width, fading up to full at 38%. An ordinary seated
-  distance measures about 21% on this workstation, so shifting in the chair will
-  not summon it — you have to lean in. Only the landmarks the wireframe actually
+  quarter of the camera's width, fading up to full at 32%. Measured live on this
+  workstation, an ordinary seated distance reads 22% and a deliberate lean
+  reaches 33%, so shifting in the chair will not summon it — you have to lean
+  in — but a comfortable lean is enough to bring it fully up. Only the landmarks the wireframe actually
   draws are transmitted; the full 478-point mesh would triple the payload and
   never be rendered.
 - Camera space is 16:9 and the habitat is as wide as the desktop, so x is scaled

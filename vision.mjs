@@ -52,9 +52,11 @@ export function disturbCreature(creature, touches, dt, speed = 0) {
 
 // The face wireframe is a reward for leaning in: it fades up with the measured
 // face width so it arrives gradually instead of snapping on at a threshold.
-// Measured on this workstation, an ordinary seated distance reads about .21, so
-// the reveal starts above that: shifting in the chair must not summon a face.
-export const NEAR_SPAN = .25, FULL_SPAN = .38;
+// Measured on this workstation: an ordinary seated distance reads .22, and a
+// deliberate lean toward the camera reaches .33. The reveal starts above the
+// resting width, so shifting in the chair cannot summon a face, and reaches
+// full at a lean that is actually comfortable to hold.
+export const NEAR_SPAN = .25, FULL_SPAN = .32;
 export function faceWireOpacity(span) {
  if (!Number.isFinite(span) || span <= NEAR_SPAN) return 0;
  return clamp((span - NEAR_SPAN) / (FULL_SPAN - NEAR_SPAN));
