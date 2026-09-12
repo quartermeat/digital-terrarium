@@ -265,12 +265,11 @@ not replay startup playback, because the bridge records that in
 Ollama may remain available independently for on-demand local inference. The
 graphical terrarium follows the desktop session.
 
-## Camera input
+## Electric skull
 
-The habitat sits at desktop level and forwards pointer motion without ever
-receiving a click, so the camera is the only channel that can actually touch it.
-Hands become a physical presence in the ecology and, when you lean in, a
-wireframe of your face is drawn over the scene.
+Lean toward the camera and your skull comes up over the habitat, drawn in
+crackling wire. Sit back and it is gone. The camera does nothing else: it is a
+spectacle, not a control surface.
 
 Vision runs in its own hidden Electron renderer, never in the window that draws
 the scene: MediaPipe inference must not compete with the habitat's frame budget,
@@ -278,36 +277,56 @@ and a vision failure cannot take the ecology down with it. That renderer owns th
 camera, posts landmarks to `POST /api/vision`, and the bridge republishes them as
 a `vision` event on `/api/stream` beside `ecosystem`, `agents`, and `audio`.
 
-- **Hands** push nearby creatures aside. A hand resting in frame barely nudges
-  them; a hand sweeping through shoves, because speed scales the force. The palm
-  and five fingertips are the parts that touch; the other landmarks only draw the
-  wireframe, which is painted in the same corrected camera space that drove the
-  physics, so what you see shoving the habitat is exactly what moved it.
-- **Your face** appears as a 136-point wireframe once it fills more than a
-  quarter of the camera's width, fading up to full at 32%. Measured live on this
-  workstation, an ordinary seated distance reads 22% and a deliberate lean
-  reaches 33%, so shifting in the chair will not summon it — you have to lean
-  in — but a comfortable lean is enough to bring it fully up. Only the landmarks the wireframe actually
-  draws are transmitted; the full 478-point mesh would triple the payload and
-  never be rendered.
-- Camera space is 16:9 and the habitat is as wide as the desktop, so x is scaled
-  about the centre to keep hands and faces in proportion. The cost is that the
-  outer margin of a very wide screen sits outside camera reach, which is honest:
-  the camera genuinely cannot see there.
+What makes it read as bone rather than as a face:
+
+- **Eyebrows and lips are never drawn.** Both are soft tissue, and drawing them
+  is what makes a wireframe look like a mask. The brow line is used only to seat
+  the top of each orbit and to spring the cranial vault; the mouth ring only to
+  place the teeth.
+- **The vault is derived, not measured.** MediaPipe's face oval stops at the
+  hairline, which is skin, and gives a flat-topped slab. The cranium is sprung
+  from the brow line and carried higher and rounder than the oval ever goes, then
+  closed with the measured jaw into a single filled outline.
+- **Orbits, not eyes.** An eye contour traces the lid, which is far tighter than
+  the bone around it, and an almond hole reads as an eye however brightly it is
+  drawn. Each socket is grown about the lid's own centre, pulled toward a circle
+  of its mean radius, and lifted to sit under the brow ridge. An ember burns deep
+  inside, drifting a little toward where the eye actually points.
+- **The nasal aperture is derived** as an inverted heart hanging between the
+  orbits and stopping clear of the teeth, because the mesh has none.
+- **Teeth are a band of bone**, wider than the lips that normally cover them and
+  drawn back from the full lip height, split by one bright seam between the jaws.
+- **It crackles.** Every edge is re-jittered each frame, brightness carries a
+  mains flicker, and bolts crawl between neighbouring points on the outline.
+  Bolts are anchored by index rather than by coordinate, so they stay on the
+  skull as it moves; a chord straight across the face would read as a scratch on
+  the screen rather than as electricity on bone.
+
+The skull fades up with the measured face width from a quarter of the camera's
+width to full at 32%. Measured live on this workstation, an ordinary seated
+distance reads 22% and a deliberate lean reaches 33%, so shifting in the chair
+will not summon a skull, but a comfortable lean brings it fully up.
+
+Camera space is 16:9 and the habitat is as wide as the desktop, so x is scaled
+about the centre to keep the skull in proportion. The cost is that the outer
+margin of a very wide screen sits outside camera reach, which is honest: the
+camera genuinely cannot see there.
 
 The camera stays open while the terrarium runs, and inference is idle-throttled:
-roughly 24 detections a second while a hand or a near face is in frame, dropping
-to four a second when nothing is, so an empty room costs almost nothing. Hands
-and faces expire half a second after the last report, so a stopped feed leaves
-nothing pinned to the scene rather than a phantom hand.
+roughly 24 detections a second while a near face is in frame, dropping to four a
+second when none is, so an empty room costs almost nothing. The skull expires
+half a second after the last report, so a stopped feed leaves nothing pinned to
+the scene.
 
-The two MediaPipe models total 12 MiB. The bridge fetches each once on first
-request and serves the cached copy from `~/.cache/digital-terrarium/` afterwards,
-so a restart without a network still starts vision. `POST /api/vision` accepts
-loopback requests only, caps the body, validates every landmark, and stamps
-arrival time itself so a skewed renderer clock cannot decide freshness.
+Only the 136 landmarks the skull actually draws are transmitted; the full
+478-point mesh would triple the payload and never be rendered. The model is
+3.6 MiB, fetched once on first request and served from
+`~/.cache/digital-terrarium/` afterwards, so a restart without a network still
+starts vision. `POST /api/vision` accepts loopback requests only, caps the body,
+validates every landmark, and stamps arrival time itself so a skewed renderer
+clock cannot decide freshness.
 
-Wireframe topology is generated from the installed MediaPipe package rather than
+Topology is generated from the installed MediaPipe package rather than
 hand-transcribed. After changing the `@mediapipe/tasks-vision` version, run:
 
 ```bash
@@ -335,14 +354,25 @@ same raw PCM shape as `parec` so capture and analysis run for real. It writes
 local previews to `/tmp/digital-terrarium-scene.png` and
 `/tmp/digital-terrarium-agent.png`, then closes its own processes.
 
-Camera input is driven the same way: the scene check posts synthetic hand and
-face landmarks to the real `/api/vision` and asserts that hands appear, that they
-push nearby creatures but not distant ones, that the face wireframe stays hidden
-at a seated distance and appears when leaned in, and that both vanish once the
-feed stops. It saves `/tmp/digital-terrarium-vision.png`.
+The camera is driven the same way: the scene check posts synthetic landmarks to
+the real `/api/vision` and asserts that the skull stays hidden at a seated
+distance, appears when leaned in, vanishes once the feed stops, and that the
+derived geometry holds — sockets open outward from the lid without drifting off
+the eye, a fully rounded socket has a single radius, nine teeth are divided by
+eight seams, and the vault closes into a jaw. It saves
+`/tmp/digital-terrarium-skull.png`.
 
 `npm run test:vision` is the one check that needs hardware and a person: it opens
-the real camera, loads both models, and reports what it actually saw over twelve
-seconds (`npm run test:vision 30` to watch for longer), saving the richest moment
-to `/tmp/digital-terrarium-camera.png`. It reports rather than asserts a subject,
-exiting non-zero only when the camera never opened.
+the real camera, loads the model, and reports what it actually saw over twelve
+seconds (`npm run test:vision 30` to watch for longer). It reports rather than
+asserts a subject, exiting non-zero only when the camera never opened. It saves
+the closest moment's landmarks to `/tmp/digital-terrarium-face.json`.
+
+```bash
+npm run skull:replay -- 0.30
+```
+
+replays that captured face at any span and screenshots the scene at the primary
+display's own aspect. Judging the skull otherwise means a person holding still in
+front of a camera at an exact distance while someone else reads the screen; a
+replay at the wrong aspect judges proportions the scene never draws.

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func handPoints(n int) []VisionPoint {
+func facePoints(n int) []VisionPoint {
 	points := make([]VisionPoint, n)
 	for i := range points {
 		points[i] = VisionPoint{X: float64(i) / float64(n), Y: .5}
@@ -20,18 +20,16 @@ func handPoints(n int) []VisionPoint {
 
 func TestVisionFrameValidation(t *testing.T) {
 	good := VisionFrame{Version: 1, Available: true, Aspect: 1.78,
-		Hands: []VisionHand{{Side: "Left", Score: .9, Gesture: "Open_Palm", Speed: 1.2, Points: handPoints(visionHandLandmarks)}}}
+		Face: &VisionFace{Score: .9, Span: .3, Points: facePoints(visionFaceLandmarks)}}
 	if !validVisionFrame(good) {
 		t.Fatal("a well-formed frame must validate")
 	}
 	for name, frame := range map[string]VisionFrame{
 		"wrong version":   {Version: 2, Aspect: 1.78},
-		"too many hands":  {Version: 1, Hands: []VisionHand{{Points: handPoints(21)}, {Points: handPoints(21)}, {Points: handPoints(21)}}},
-		"short hand":      {Version: 1, Hands: []VisionHand{{Points: handPoints(20)}}},
-		"unruly gesture":  {Version: 1, Hands: []VisionHand{{Gesture: "rm -rf\n/", Points: handPoints(21)}}},
-		"bad side":        {Version: 1, Hands: []VisionHand{{Side: "Third", Points: handPoints(21)}}},
-		"impossible span": {Version: 1, Face: &VisionFace{Span: 4, Points: handPoints(visionFaceLandmarks)}},
-		"short face":      {Version: 1, Face: &VisionFace{Points: handPoints(12)}},
+		"impossible span": {Version: 1, Face: &VisionFace{Span: 4, Points: facePoints(visionFaceLandmarks)}},
+		"short face":      {Version: 1, Face: &VisionFace{Points: facePoints(12)}},
+		"long face":       {Version: 1, Face: &VisionFace{Points: facePoints(478)}},
+		"unruly camera":   {Version: 1, Camera: "rm -rf\n/"},
 		"absurd aspect":   {Version: 1, Aspect: 99},
 	} {
 		if validVisionFrame(frame) {
@@ -41,33 +39,32 @@ func TestVisionFrameValidation(t *testing.T) {
 }
 
 func TestVisionCoordinatesStayNearTheFrame(t *testing.T) {
-	frame := VisionFrame{Version: 1, Hands: []VisionHand{{Points: handPoints(visionHandLandmarks)}}}
-	frame.Hands[0].Points[3].X = 7
+	frame := VisionFrame{Version: 1, Face: &VisionFace{Points: facePoints(visionFaceLandmarks)}}
+	frame.Face.Points[3].X = 7
 	if validVisionFrame(frame) {
 		t.Fatal("a landmark far outside the frame must be rejected")
 	}
 }
 
-func TestVisionHubExpiresHandsButServesFreshOnes(t *testing.T) {
+func TestVisionHubExpiresTheSkullButServesFreshOnes(t *testing.T) {
 	hub := &visionHub{}
 	if hub.frameNow().Available {
 		t.Fatal("an unstarted camera must not read as available")
 	}
-	hub.store(VisionFrame{Version: 1, Available: true, SampledAt: time.Now(),
-		Hands: []VisionHand{{Points: handPoints(visionHandLandmarks)}}})
-	if len(hub.frameNow().Hands) != 1 {
+	face := &VisionFace{Span: .3, Points: facePoints(visionFaceLandmarks)}
+	hub.store(VisionFrame{Version: 1, Available: true, SampledAt: time.Now(), Face: face})
+	if hub.frameNow().Face == nil {
 		t.Fatal("a fresh frame must be served")
 	}
-	hub.store(VisionFrame{Version: 1, Available: true, SampledAt: time.Now().Add(-time.Second),
-		Hands: []VisionHand{{Points: handPoints(visionHandLandmarks)}}})
-	if got := hub.frameNow(); got.Available || len(got.Hands) != 0 {
-		t.Fatalf("a stale hand must disappear rather than linger: %#v", got)
+	hub.store(VisionFrame{Version: 1, Available: true, SampledAt: time.Now().Add(-time.Second), Face: face})
+	if got := hub.frameNow(); got.Available || got.Face != nil {
+		t.Fatalf("a stale skull must disappear rather than linger: %#v", got)
 	}
 }
 
 func TestVisionPostStampsOnArrivalAndRejectsRemotes(t *testing.T) {
 	hub := &visionHub{}
-	body := `{"version":1,"available":true,"aspect":1.78,"sampledAt":"2000-01-01T00:00:00Z","hands":[]}`
+	body := `{"version":1,"available":true,"aspect":1.78,"sampledAt":"2000-01-01T00:00:00Z"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/vision", strings.NewReader(body))
 	request.RemoteAddr = "127.0.0.1:5000"
 	recorder := httptest.NewRecorder()
@@ -91,7 +88,7 @@ func TestVisionPostStampsOnArrivalAndRejectsRemotes(t *testing.T) {
 func TestVisionPostRejectsMalformedBodies(t *testing.T) {
 	hub := &visionHub{}
 	oversized, _ := json.Marshal(VisionFrame{Version: 1, Available: true,
-		Hands: []VisionHand{{Points: handPoints(2000)}}})
+		Face: &VisionFace{Points: facePoints(4000)}})
 	for name, body := range map[string]string{"not json": "{", "invalid": `{"version":3}`, "oversized": string(oversized)} {
 		request := httptest.NewRequest(http.MethodPost, "/api/vision", bytes.NewReader([]byte(body)))
 		request.RemoteAddr = "127.0.0.1:5000"

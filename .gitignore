@@ -2,3 +2,6 @@ bin/
 node_modules/
 spotify-token.json
 __pycache__/
+# A bare `go build` in this directory writes the binary here; bin/ is the
+# build output that belongs to the project.
+/digital-terrarium

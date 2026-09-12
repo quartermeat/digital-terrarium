@@ -1,55 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { visionFresh, handTouchPoints, disturbCreature, faceWireOpacity, aspectScale, correctPoints, NEAR_SPAN, FULL_SPAN } from './vision.mjs';
-import { FACE_WIRE_INDICES, FACE_WIRE_EDGES, HAND_WIRE_EDGES } from './vision-topology.mjs';
-import { emptyCreature } from './ecology.mjs';
+import { visionFresh, faceWireOpacity, aspectScale, correctPoints, centroid, expandRing, roundRing, toothBand, nasalCavity, cranialDome, skullSilhouette, NEAR_SPAN, FULL_SPAN } from './vision.mjs';
+import { FACE_WIRE_INDICES, FACE_EDGES, FACE_RINGS } from './vision-topology.mjs';
 
-const hand = (x=.5,y=.5) => ({ points: Array.from({length:21},()=>({x,y})), speed:0 });
-
-test('a hand is only present while the camera is still reporting it',()=>{
+test('a skull is only present while the camera is still reporting it',()=>{
  const now=Date.now();
  assert.ok(visionFresh({version:1,available:true,sampledAt:new Date(now).toISOString()},now));
- assert.ok(!visionFresh({version:1,available:true,sampledAt:new Date(now-900).toISOString()},now),'a stopped feed must not leave a phantom hand');
+ assert.ok(!visionFresh({version:1,available:true,sampledAt:new Date(now-900).toISOString()},now),'a stopped feed must not leave a phantom skull');
  assert.ok(!visionFresh({version:1,available:false,sampledAt:new Date(now).toISOString()},now));
  assert.ok(!visionFresh({version:2,available:true,sampledAt:new Date(now).toISOString()},now));
  assert.ok(!visionFresh(null,now));
  assert.ok(!visionFresh({version:1,available:true,sampledAt:new Date(now+5000).toISOString()},now),'a future stamp is not freshness');
 });
 
-test('touch points are the palm and five fingertips, and malformed hands touch nothing',()=>{
- assert.equal(handTouchPoints(hand()).length,6);
- assert.deepEqual(handTouchPoints({points:[]}),[]);
- assert.deepEqual(handTouchPoints(undefined),[]);
-});
-
-test('a still hand barely nudges; a sweeping hand shoves, and always outward',()=>{
- const near=()=>Object.assign(emptyCreature(),{x:.52,y:.5});
- const resting=near(),sweeping=near();
- const touches=handTouchPoints(hand());
- const gentle=disturbCreature(resting,touches,.016,0);
- const forceful=disturbCreature(sweeping,touches,.016,3);
- assert.ok(gentle>0&&forceful>gentle*2,'speed must scale the shove');
- assert.ok(sweeping.x>.52,'creatures move away from the hand, never through it');
- const far=Object.assign(emptyCreature(),{x:.95,y:.05});
- assert.equal(disturbCreature(far,touches,.016,3),0,'a hand cannot reach across the habitat');
-});
-
-test('a creature pinned exactly under a fingertip still escapes, and stays in the habitat',()=>{
- const trapped=Object.assign(emptyCreature(),{x:.5,y:.5,phase:1});
- disturbCreature(trapped,handTouchPoints(hand()),.05,3);
- assert.ok(Number.isFinite(trapped.x)&&Number.isFinite(trapped.y));
- const edge=Object.assign(emptyCreature(),{x:.5,y:.5});
- for(let i=0;i<400;i++)disturbCreature(edge,handTouchPoints(hand(.5,.5)),.05,3);
- assert.ok(edge.x>=.02&&edge.x<=.98&&edge.y>=.04&&edge.y<=.96,'a shoved creature cannot leave the habitat');
-});
-
-test('the face wireframe fades in with proximity instead of snapping on',()=>{
+test('the skull fades in with proximity instead of snapping on',()=>{
  assert.equal(faceWireOpacity(NEAR_SPAN),0);
  assert.equal(faceWireOpacity(.1),0);
  assert.equal(faceWireOpacity(FULL_SPAN),1);
  assert.equal(faceWireOpacity(.9),1);
- assert.ok(faceWireOpacity((NEAR_SPAN+FULL_SPAN)/2)>0&&faceWireOpacity((NEAR_SPAN+FULL_SPAN)/2)<1);
+ const middle=faceWireOpacity((NEAR_SPAN+FULL_SPAN)/2);
+ assert.ok(middle>0&&middle<1);
  assert.equal(faceWireOpacity(undefined),0);
+ // Calibrated against live measurement: resting .22 shows nothing, a lean fills.
+ assert.equal(faceWireOpacity(.22),0);
+ assert.equal(faceWireOpacity(.33),1);
 });
 
 test('camera space is narrowed to keep proportions, centred, and survives a missing aspect',()=>{
@@ -64,8 +38,82 @@ test('camera space is narrowed to keep proportions, centred, and survives a miss
  assert.equal(centre.y,.3,'only width is corrected');
 });
 
+test('a lid contour opens outward into a socket, keeping its centre',()=>{
+ const lid=[{x:10,y:0},{x:0,y:10},{x:-10,y:0},{x:0,y:-10}];
+ const middle=centroid(lid);
+ assert.deepEqual(middle,{x:0,y:0});
+ const socket=expandRing(lid,1.55);
+ assert.deepEqual(centroid(socket),middle,'a socket stays centred on the eye it came from');
+ assert.ok(socket.every((point,i)=>Math.hypot(point.x,point.y)>Math.hypot(lid[i].x,lid[i].y)),'bone sits outside the lid');
+ assert.deepEqual(centroid([]),{x:0,y:0});
+});
+
+test('an almond lid is pulled toward a round hollow without moving off the eye',()=>{
+ const lid=[{x:20,y:0},{x:0,y:5},{x:-20,y:0},{x:0,y:-5}];
+ const round=roundRing(lid,1);
+ const radii=round.map(point=>Math.hypot(point.x,point.y));
+ assert.ok(Math.max(...radii)-Math.min(...radii)<1e-9,'full roundness gives one radius');
+ const middle=centroid(round);
+ assert.ok(Math.abs(middle.x)<1e-9&&Math.abs(middle.y)<1e-9,'the hollow stays on the eye');
+ const partial=roundRing(lid,.5).map(point=>Math.hypot(point.x,point.y));
+ assert.ok(Math.max(...partial)<20&&Math.min(...partial)>5,'partial roundness lands between lid and circle');
+ assert.deepEqual(roundRing([],1),[]);
+ assert.deepEqual(roundRing(lid,0).map(p=>Math.round(Math.hypot(p.x,p.y))),[20,5,20,5],'no roundness leaves the lid alone');
+});
+
+test('teeth are a band of bone, wider and shorter than the lips covering them',()=>{
+ const mouth=[{x:0,y:0},{x:10,y:-4},{x:20,y:0},{x:20,y:1},{x:10,y:6},{x:0,y:1}];
+ const band=toothBand(mouth,9);
+ assert.equal(band.bars.length,8,'nine teeth are divided by eight seams');
+ assert.ok(band.left<0&&band.right>20,'the jaw is broader than the mouth over it');
+ assert.ok(band.top>-4&&band.bottom<6,'the band is drawn back from the full lip height');
+ assert.ok(band.midline>band.top&&band.midline<band.bottom,'the jaws part inside the band');
+ assert.ok(band.bars.every(x=>x>band.left&&x<band.right),'no seam falls outside the band');
+ assert.equal(toothBand(mouth,0),null);
+ assert.equal(toothBand([],9),null);
+ assert.equal(toothBand([{x:5,y:0},{x:5,y:4}],9),null,'a band with no width is no band');
+});
+
+test('the cranial vault springs from the brow and closes the jaw into one outline',()=>{
+ const ring=Array.from({length:24},(_,i)=>{
+  const angle=i/24*Math.PI*2;
+  return {x:Math.cos(angle)*50,y:Math.sin(angle)*70+40};
+ });
+ const browY=-10;
+ const dome=cranialDome(ring,browY);
+ assert.ok(dome.length>=3);
+ assert.ok(Math.min(...dome.map(point=>point.y))<browY,'the vault rises above the brow');
+ assert.ok(dome.every(point=>point.y<=browY+1e-9),'the vault never dips below the brow line');
+ assert.ok(Math.abs(dome[0].x+50)<1e-6&&Math.abs(dome[dome.length-1].x-50)<1e-6,'it runs temple to temple');
+ const outline=skullSilhouette(ring,browY);
+ assert.ok(outline.length>dome.length,'the jaw is carried on past the vault');
+ const bottom=Math.max(...ring.map(point=>point.y));
+ assert.ok(Math.max(...outline.map(point=>point.y))===bottom,'the chin survives into the outline');
+ assert.deepEqual(cranialDome([],0),[]);
+ assert.deepEqual(skullSilhouette([],0),[]);
+});
+
+test('the nasal aperture hangs between the sockets and stops above the teeth',()=>{
+ const nose=nasalCavity({x:-20,y:0},{x:20,y:0},60);
+ assert.ok(nose.length>=5);
+ const ys=nose.map(point=>point.y),xs=nose.map(point=>point.x);
+ assert.ok(Math.min(...ys)>0&&Math.max(...ys)<60,'the aperture sits between bridge and teeth');
+ assert.ok(Math.min(...xs)>-20&&Math.max(...xs)<20,'the aperture stays inside the sockets');
+ assert.deepEqual(nasalCavity({x:-20,y:80},{x:20,y:80},60),[],'teeth above the bridge yield no aperture');
+});
+
 test('generated topology indexes only landmarks that are actually transmitted',()=>{
  assert.equal(FACE_WIRE_INDICES.length,136);
- assert.ok(FACE_WIRE_EDGES.every(([a,b])=>a>=0&&b>=0&&a<FACE_WIRE_INDICES.length&&b<FACE_WIRE_INDICES.length));
- assert.ok(HAND_WIRE_EDGES.every(([a,b])=>a>=0&&b>=0&&a<21&&b<21));
+ const within=([a,b])=>a>=0&&b>=0&&a<FACE_WIRE_INDICES.length&&b<FACE_WIRE_INDICES.length;
+ for(const [name,edges] of Object.entries(FACE_EDGES)) assert.ok(edges.every(within),name+' edges stay in range');
+ for(const [name,loops] of Object.entries(FACE_RINGS))
+  for(const loop of loops) assert.ok(loop.every(index=>index>=0&&index<FACE_WIRE_INDICES.length),name+' ring stays in range');
+ // The skull needs these specific closed loops to fill bone, sockets and mouth.
+ assert.equal(FACE_RINGS.cranium[0].length,36);
+ assert.equal(FACE_RINGS.leftEye[0].length,16);
+ assert.equal(FACE_RINGS.rightEye[0].length,16);
+ assert.equal(FACE_RINGS.mouth.length,2,'an outer and an inner lip ring');
+ assert.ok(FACE_RINGS.mouth[0].length>=FACE_RINGS.mouth[1].length,'the outer ring comes first');
+ assert.ok(FACE_EDGES.leftBrow.length&&FACE_EDGES.rightBrow.length,'brows still seat the sockets and the vault');
+ assert.equal(FACE_RINGS.leftIris[0].length,4);
 });

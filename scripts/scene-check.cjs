@@ -87,48 +87,58 @@ app.whenReady().then(async () => {
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.agentCount"),'0');
  await window.webContents.executeJavaScript("document.querySelector('canvas').dispatchEvent(new PointerEvent('pointerleave'))");
  // Camera input through the real bridge and the real scene. A verification run
- // cannot wave at a camera, so synthetic landmarks drive the genuine feed the
+ // cannot lean into a camera, so synthetic landmarks drive the genuine feed the
  // same way synthetic PCM drives speaker capture above.
  const postVision = body => fetch(url+'/api/vision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- const handAt = (x,y,speed=0) => ({side:'Left',score:.95,gesture:'Open_Palm',speed,
-  points:Array.from({length:21},(_,i)=>({x:x+(i%5)*.011,y:y+Math.floor(i/5)*.013}))});
+ // A ring of landmarks is not a face, but it exercises every path the skull
+ // draws: rings to fill, edges to stroke, and a span that gates the reveal.
  const faceAt = span => ({score:1,span,
   points:Array.from({length:136},(_,i)=>({x:.5+Math.cos(i/136*Math.PI*2)*span/2,y:.5+Math.sin(i/136*Math.PI*2)*span*.65}))});
  const dataset = key => window.webContents.executeJavaScript(`document.querySelector('canvas').dataset.${key}`);
- let visionBody={version:1,available:true,aspect:16/9,camera:'scene-check',hands:[handAt(.44,.46,2.4)]};
- // Hands expire in half a second by design, so the feed has to keep reporting.
+ let visionBody={version:1,available:true,aspect:16/9,camera:'scene-check',face:faceAt(.14)};
+ // The skull expires in half a second by design, so the feed has to keep reporting.
  const visionFeed=setInterval(()=>postVision(visionBody).catch(()=>{}),100);
+ // Sitting back shows nothing; leaning in brings the skull up.
  await pause(600);
- assert.equal(await dataset('hands'),'1');
- assert.equal(await dataset('face'),'false');
- // A hand must actually move the habitat, not merely draw over it.
- const shoved=await window.webContents.executeJavaScript(`(async()=>{
-  const { emptyCreature } = await import('./ecology.mjs');
-  const { handTouchPoints, disturbCreature } = await import('./vision.mjs');
-  const near={...emptyCreature(),x:.47,y:.48}, far={...emptyCreature(),x:.9,y:.9};
-  const touches=handTouchPoints(${JSON.stringify(handAt(.44,.46))});
-  return {near:disturbCreature(near,touches,.05,2.4),far:disturbCreature(far,touches,.05,2.4)};
+ assert.equal(await dataset('skull'),'false');
+ visionBody={...visionBody,face:faceAt(.34)};
+ await pause(400);
+ assert.equal(await dataset('skull'),'true');
+ fs.writeFileSync('/tmp/digital-terrarium-skull.png',(await window.webContents.capturePage()).toPNG());
+ // Geometry the skull is built from, exercised through the real modules.
+ const bone=await window.webContents.executeJavaScript(`(async()=>{
+  const { centroid, expandRing, roundRing, toothBand, nasalCavity, cranialDome, skullSilhouette, faceWireOpacity } = await import('./vision.mjs');
+  const { FACE_RINGS } = await import('./vision-topology.mjs');
+  const lid=[{x:10,y:0},{x:0,y:10},{x:-10,y:0},{x:0,y:-10}];
+  return {
+   socketOutsideLid:expandRing(lid,1.55).every((p,i)=>Math.hypot(p.x,p.y)>Math.hypot(lid[i].x,lid[i].y)),
+   socketCentred:JSON.stringify(centroid(expandRing(lid,1.55)))===JSON.stringify(centroid(lid)),
+   rounded:new Set(roundRing(lid,1).map(p=>Math.round(Math.hypot(p.x,p.y)))).size,
+   teeth:toothBand([{x:0,y:0},{x:10,y:-4},{x:20,y:0},{x:20,y:1},{x:10,y:6},{x:0,y:1}],9).bars.length,
+   cavity:nasalCavity({x:-20,y:0},{x:20,y:0},60).length,
+   vault:cranialDome(FACE_RINGS.cranium[0].map((_,i)=>({x:Math.cos(i)*50,y:Math.sin(i)*70})),-10).length,
+   outline:skullSilhouette(FACE_RINGS.cranium[0].map((_,i)=>({x:Math.cos(i)*50,y:Math.sin(i)*70})),-10).length,
+   rings:FACE_RINGS.cranium[0].length,
+   faded:faceWireOpacity(.28)>0&&faceWireOpacity(.28)<1,
+  };
  })()`);
- assert.ok(shoved.near>0&&shoved.far===0,'hands must push nearby creatures only');
- // Leaning in reveals the wireframe; sitting back does not.
- visionBody={...visionBody,face:faceAt(.14)};
- await pause(400);
- assert.equal(await dataset('face'),'false');
- visionBody={...visionBody,face:faceAt(.42)};
- await pause(400);
- assert.equal(await dataset('face'),'true');
- fs.writeFileSync('/tmp/digital-terrarium-vision.png',(await window.webContents.capturePage()).toPNG());
+ assert.ok(bone.socketOutsideLid&&bone.socketCentred,'sockets must open outward from the lid');
+ assert.equal(bone.rounded,1,'a fully rounded socket must have a single radius');
+ assert.equal(bone.teeth,8,'nine teeth are divided by eight seams');
+ assert.ok(bone.cavity>=5,'the nasal aperture must be derived');
+ assert.ok(bone.vault>=3&&bone.outline>bone.vault,'the vault must close into a jaw');
+ assert.equal(bone.rings,36);
+ assert.ok(bone.faded,'the skull must fade rather than snap on');
  // A camera that stops reporting must leave nothing behind.
  clearInterval(visionFeed);
  await pause(900);
- assert.equal(await dataset('hands'),'0');
- assert.equal(await dataset('face'),'false');
+ assert.equal(await dataset('skull'),'false');
  // A failed bridge must visibly become stale rather than invent activity.
  fs.writeFileSync('/tmp/digital-terrarium-scene.png',(await window.webContents.capturePage()).toPNG());
  bridge.kill();await pause(3500);
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh"),'false');
  const unexpected=errors.filter(message=>!message.includes('ERR_CONNECTION_REFUSED')&&!message.includes('Failed to fetch'));
  assert.deepEqual(unexpected,[]);
- console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,vision:{hands:true,face:true,shoved:shoved.near>0,expires:true,screenshot:'/tmp/digital-terrarium-vision.png'},processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
+ console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,skull:{hidden:true,revealed:true,...bone,expires:true,screenshot:'/tmp/digital-terrarium-skull.png'},processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
  clearTimeout(timeout);finish(0);
 }).catch(error=>{console.error(error);clearTimeout(timeout);finish(1);});
