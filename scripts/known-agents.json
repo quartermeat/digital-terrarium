@@ -1,0 +1,17 @@
+{
+  "agents": [
+    {
+      "idPrefix": "claude-",
+      "name": "Claude",
+      "hookScript": "scripts/claude-activity-hook.py",
+      "hookConfig": "~/.claude/settings.json",
+      "setupScript": "scripts/setup-claude-hooks.py"
+    },
+    {
+      "idPrefix": "codex-",
+      "name": "Codex",
+      "hookScript": "scripts/codex-activity-hook.py",
+      "hookConfig": "~/.codex/hooks.json"
+    }
+  ]
+}

@@ -200,7 +200,11 @@ Adapters reporting `thinking`, `working`, or `tool` must refresh at least every
 five seconds or the report is dropped; `idle`, `waiting`, and `error` have no
 such deadline. This small protocol is
 intended for Codex wrappers, Ollama-backed workers, and future local agents; it
-does not require a particular agent framework.
+does not require a particular agent framework. `scripts/known-agents.json` is
+a reference list of what's actually wired up (currently Claude and Codex) —
+the runtime doesn't read it, since any conforming JSON file in the agents
+directory renders regardless of its `id` prefix; it's just somewhere to note
+a new adapter's hook script and config path when one gets added.
 
 The user-level `~/.codex/hooks.json` sends supported Codex lifecycle events to
 `scripts/codex-activity-hook.py`; `~/.claude/settings.json` does the same for
