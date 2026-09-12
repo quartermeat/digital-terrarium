@@ -1,6 +1,13 @@
+// Mirrors validAgent in agents.go: thinking/working/tool describe activity in
+// progress and expire after five seconds, while idle/waiting/error describe a
+// condition that stays true until a fresh report supersedes it.
+const AT_REST_PHASES=['idle','waiting','error'];
 export const agentFresh = (agent, now=Date.now()) => {
+ if(agent?.version!==1)return false;
  const age=now-Date.parse(agent?.sampledAt);
- return agent?.version===1 && age>=0 && age<5000;
+ if(age<0)return false;
+ if(AT_REST_PHASES.includes(agent?.phase))return true;
+ return age<5000;
 };
 
 export function chooseAgentTarget(agent, creatures, disks, width, height) {
