@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Project Codex lifecycle events into the privacy-bounded Terrarium protocol."""
 
+import calendar
 import hashlib
 import json
 import os
 import pwd
 from pathlib import Path
 import re
+import signal
+import subprocess
 import sys
 import time
 
@@ -20,6 +23,9 @@ if os.geteuid() == 0 and owner.pw_uid != 0:
 desktop_home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
 AGENTS = desktop_home / ".local/state/digital-terrarium/agents"
 SAFE = re.compile(r"[^a-zA-Z0-9_. /:@+-]")
+HOST_COMM = "codex"
+STALE_AFTER = 5
+WATCH_INTERVAL = 1.5
 
 
 def clean(value, limit=96):
@@ -37,6 +43,10 @@ def atomic(path, value):
 def agent_path_for(session_id):
     identity = hashlib.sha256(session_id.encode()).hexdigest()[:12]
     return f"codex-{identity}", AGENTS / f"codex-{identity}.json"
+
+
+def watch_pid_path(agent_path):
+    return agent_path.with_suffix(".watch.pid")
 
 
 def publish(agent_path, agent_id, phase, detail, target):
@@ -70,11 +80,99 @@ def tool_target(event):
     return tool, {"kind": "filesystem", "name": clean(cwd, 96)}
 
 
+def host_pid():
+    """Walk up the process tree to find the long-lived CLI process. The
+    hook's immediate parent is a short-lived per-invocation wrapper that's
+    typically already gone by the time the hook returns, so it's useless for
+    a liveness check on its own — the actual host is a few levels up."""
+    pid = os.getpid()
+    for _ in range(12):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return None
+        comm = stat.split("(", 1)[1].rsplit(")", 1)[0]
+        if comm == HOST_COMM:
+            return pid
+        fields = stat.rsplit(")", 1)[1].split()
+        ppid = int(fields[1])
+        if pid == ppid or ppid <= 1:
+            return None
+        pid = ppid
+    return None
+
+
+def stop_watch(agent_path):
+    path = watch_pid_path(agent_path)
+    try:
+        pid = int(path.read_text())
+    except (OSError, ValueError):
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+    path.unlink(missing_ok=True)
+
+
+def watch_forever(agent_path, host, agent_id):
+    def stop(*_):
+        agent_path.unlink(missing_ok=True)
+        watch_pid_path(agent_path).unlink(missing_ok=True)
+        raise SystemExit
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while True:
+            try:
+                os.kill(host, 0)
+            except OSError:
+                break
+            try:
+                current = json.loads(agent_path.read_text())
+                sampled = calendar.timegm(time.strptime(current["sampledAt"], "%Y-%m-%dT%H:%M:%SZ"))
+                stale = current.get("phase") not in ("idle", "waiting", "error") and time.time() - sampled > STALE_AFTER
+            except (OSError, ValueError, KeyError):
+                stale = True
+            # Only ever fills the gap after real activity has genuinely gone
+            # stale (or the file vanished unexpectedly) — never overwrites a
+            # fresh report, and never fabricates activity that isn't real.
+            if stale:
+                publish(agent_path, agent_id, "waiting", "ready for direction", {})
+            time.sleep(WATCH_INTERVAL)
+    finally:
+        agent_path.unlink(missing_ok=True)
+        watch_pid_path(agent_path).unlink(missing_ok=True)
+
+
+def ensure_watch(agent_path, agent_id):
+    path = watch_pid_path(agent_path)
+    try:
+        pid = int(path.read_text())
+        os.kill(pid, 0)
+        return
+    except (OSError, ValueError):
+        path.unlink(missing_ok=True)
+    host = host_pid()
+    if host is None:
+        return
+    process = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--watch", str(agent_path), str(host), agent_id],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    path.write_text(str(process.pid))
+
+
 def handle(event):
     session_id = str(event.get("session_id") or "unknown")
     agent_id, agent_path = agent_path_for(session_id)
     name = event.get("hook_event_name", "")
     if name == "SessionEnd":
+        stop_watch(agent_path)
         agent_path.unlink(missing_ok=True)
         return
     if name in ("SubagentStart", "SubagentStop") and not event.get("agent_type"):
@@ -102,15 +200,16 @@ def handle(event):
         phase, detail = "waiting", "ready for direction"
     elif name == "Interrupt":
         phase, detail = "waiting", "interrupted"
-    # No heartbeat: publish exactly what was sampled and let it age out (the
-    # bridge drops anything older than five seconds) rather than keeping a
-    # background process alive to keep republishing a stale phase.
     publish(agent_path, agent_id, phase, detail, target)
+    ensure_watch(agent_path, agent_id)
 
 
 if __name__ == "__main__":
-    try:
-        handle(json.load(sys.stdin))
-    except Exception:
-        # Observability must never block or alter the agent operation.
-        pass
+    if len(sys.argv) == 5 and sys.argv[1] == "--watch":
+        watch_forever(Path(sys.argv[2]), int(sys.argv[3]), sys.argv[4])
+    else:
+        try:
+            handle(json.load(sys.stdin))
+        except Exception:
+            # Observability must never block or alter the agent operation.
+            pass

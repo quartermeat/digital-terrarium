@@ -209,12 +209,22 @@ a new adapter's hook script and config path when one gets added.
 The user-level `~/.codex/hooks.json` sends supported Codex lifecycle events to
 `scripts/codex-activity-hook.py`; `~/.claude/settings.json` does the same for
 Claude Code via `scripts/claude-activity-hook.py`. Each hook invocation writes
-exactly one sampled report and exits — there is no background heartbeat
-process republishing a stale phase between events. A quiet agent simply ages
-past the five-second freshness window and disappears; nothing keeps it alive
-artificially. Reports never read transcripts, prompts, command arguments, or
-tool results — only the documented lifecycle event, tool name, working
-directory or file target, and a hashed session identifier.
+exactly one sampled report — nothing keeps *that* report alive artificially,
+and a report describing real activity (`thinking`/`working`/`tool`) still
+ages out after five seconds with no further embellishment. But an agentic
+CLI process being alive and available for commands is itself worth showing,
+even in the gaps between hook events, so each hook also ensures a small
+watchdog subprocess is running for the session: it periodically checks
+whether the CLI process (found by walking up from the hook's own process
+tree — the hook's immediate parent is a short-lived per-invocation wrapper,
+not the long-lived CLI, so the walk goes a few levels further) is still
+alive, and only ever fills in `waiting` once the last real report has
+genuinely gone stale — never overwriting a fresh one, never guessing at
+activity that isn't real. The watchdog stops and removes its own report the
+moment the CLI process actually exits, or immediately on `SessionEnd`.
+Reports never read transcripts, prompts, command arguments, or tool
+results — only the documented lifecycle event, tool name, working directory
+or file target, and a hashed session identifier.
 `~/.local/bin/codex` launches the installed CLI normally. If explicitly invoked
 through sudo by full path, it drops back to the desktop account rather than
 granting the entire agent permanent root authority; commands needing elevation
