@@ -155,9 +155,14 @@ dart much faster than process creatures, visiting the named target first and the
 hopping rapidly among live process beings and filesystem roots. A process target
 leads to the matching process creature; a filesystem target leads to the longest
 matching mounted root. Green code fragments mark fast travel and active work.
-Hover to see the agent, phase, detail, and
-resolved destination. Reports older than five seconds disappear rather than
-inventing activity.
+Hover to see the agent, phase, detail, and resolved destination. `thinking`,
+`working`, and `tool` describe activity actually in progress, so a report in
+one of those phases older than five seconds is dropped rather than kept
+animating past what was really sampled. `idle`, `waiting`, and `error`
+describe a condition rather than an event — a "waiting for direction" report
+stays valid indefinitely, since the agent really is still sitting there, until
+a fresh report supersedes it or the source deletes its own file (a `SessionEnd`
+hook, for example).
 
 Adapters atomically publish one bounded JSON file per agent in
 `~/.local/state/digital-terrarium/agents/`. The schema contains only version, ID,
@@ -191,7 +196,9 @@ TERRARIUM_AGENT_ID=worker TERRARIUM_AGENT_NAME='Local worker' \
 ```
 
 Valid phases are `idle`, `thinking`, `working`, `tool`, `waiting`, and `error`.
-Active adapters must refresh at least every five seconds. This small protocol is
+Adapters reporting `thinking`, `working`, or `tool` must refresh at least every
+five seconds or the report is dropped; `idle`, `waiting`, and `error` have no
+such deadline. This small protocol is
 intended for Codex wrappers, Ollama-backed workers, and future local agents; it
 does not require a particular agent framework.
 

@@ -12,11 +12,14 @@ func TestAgentActivityValidation(t *testing.T) {
 	directory := t.TempDir()
 	write := func(name, body string) { t.Helper(); if err := os.WriteFile(filepath.Join(directory, name), []byte(body), 0600); err != nil { t.Fatal(err) } }
 	write("operator.json", `{"version":1,"id":"codex","name":"Codex","sampledAt":"`+now.Format(time.RFC3339Nano)+`","phase":"tool","detail":"apply_patch","target":{"kind":"filesystem","name":"/home/quartermeat/work"}}`)
-	write("stale.json", `{"version":1,"id":"old","name":"Old","sampledAt":"`+now.Add(-time.Minute).Format(time.RFC3339Nano)+`","phase":"idle"}`)
+	write("stale-tool.json", `{"version":1,"id":"old-tool","name":"Old","sampledAt":"`+now.Add(-time.Minute).Format(time.RFC3339Nano)+`","phase":"tool"}`)
+	write("stale-waiting.json", `{"version":1,"id":"old-waiting","name":"Old","sampledAt":"`+now.Add(-time.Hour).Format(time.RFC3339Nano)+`","phase":"waiting"}`)
 	write("invalid.json", `{"version":1,"id":"bad","name":"Bad","sampledAt":"`+now.Format(time.RFC3339Nano)+`","phase":"executing arbitrary commands"}`)
 	write("ignored.txt", "not json")
 	got := readAgentActivities(directory, now)
-	if len(got) != 1 || got[0].ID != "codex" || got[0].Target.Kind != "filesystem" { t.Fatalf("unexpected activities: %#v", got) }
+	if len(got) != 2 || got[0].ID != "codex" || got[0].Target.Kind != "filesystem" || got[1].ID != "old-waiting" {
+		t.Fatalf("unexpected activities: %#v", got)
+	}
 }
 
 func TestAgentFieldsRejectControlCharacters(t *testing.T) {

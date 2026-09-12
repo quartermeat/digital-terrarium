@@ -30,13 +30,21 @@ var safeAgentField = regexp.MustCompile(`^[a-zA-Z0-9_. /:@+-]{0,96}$`)
 var safeAgentID = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,48}$`)
 
 func validAgent(a AgentActivity, now time.Time) bool {
+	age := now.Sub(a.SampledAt)
 	if a.Version != 1 || !safeAgentID.MatchString(a.ID) ||
 		a.Name == "" || !safeAgentField.MatchString(a.Name) || !safeAgentField.MatchString(a.Detail) ||
-		now.Sub(a.SampledAt) < 0 || now.Sub(a.SampledAt) > 5*time.Second {
+		age < 0 {
 		return false
 	}
 	switch a.Phase {
-	case "idle", "thinking", "working", "tool", "waiting", "error":
+	// At-rest phases represent a condition, not an event in progress: they
+	// stay valid until a fresh sample supersedes them or the source deletes
+	// its own file (e.g. on SessionEnd), rather than expiring on a timer.
+	case "idle", "waiting", "error":
+	case "thinking", "working", "tool":
+		if age > 5*time.Second {
+			return false
+		}
 	default:
 		return false
 	}
