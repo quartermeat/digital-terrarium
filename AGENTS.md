@@ -33,50 +33,56 @@ investigation below is retained for context.
 normally but serves the *previous* build. Nothing errors and nothing logs, so the
 deploy looks successful. Only the behaviour is wrong.
 
-**Cause.** `ensureBridge()` (`electron-main.js:33`) skips spawning a bridge when
-`bridgeIsRunning()` (`electron-main.js:18`) says one is healthy, and that check
-(`electron-main.js:24`) only asks whether `/api/health` reports
-`app: "digital-terrarium"` and `telemetryVersion: 1`. Both fields are constants
-in `server.go:105` and do not change between releases, so *every* build of this
-bridge looks identical to the check. Whatever is already holding
-`127.0.0.1:8091` is adopted, however old it is.
+**Verifying it is working.** The bridge reports its build identity, so a
+mismatch is a question rather than an investigation:
+
+```bash
+curl -s http://127.0.0.1:8091/api/health   # version must match package.json
+```
+
+A restart that lands on the new version needs no intervention. On 2026-09-12 the
+first restart after the fix moved the bridge from 1.9.1 to 1.10.1 on its own,
+where every earlier deploy that day had needed a PID killed by hand.
+
+### History
+
+Everything below describes the problem as it stood before v1.9.2. It is kept for
+context, not as instructions: the line references are pre-fix and no longer point
+at the code they name, and the remedies are superseded by the recovery path.
+
+**Cause (pre-fix).** `ensureBridge()` skipped spawning a bridge when
+`bridgeIsRunning()` said one was healthy, and that check only asked whether
+`/api/health` reported `app: "digital-terrarium"` and `telemetryVersion: 1`.
+Both are constants that do not change between releases, so *every* build of this
+bridge looked identical to the check, and whatever already held
+`127.0.0.1:8091` was adopted however old it was.
 
 **Observed twice on 2026-09-12:**
 
-- A bridge started 05:37 was still holding the port at 14:56, outside the
-  service cgroup. The v1.8.0 Electron adopted it. That binary predated
-  `/vision.html`, so the hidden vision renderer got a 404, died quietly, and the
-  camera never opened. The reported fault was "the webcam LED is not on".
+- A bridge started 05:37 was still holding the port at 14:56. The v1.8.0
+  Electron adopted it. That binary predated `/vision.html`, so the hidden vision
+  renderer got a 404, died quietly, and the camera never opened. The reported
+  fault was "the webcam LED is not on".
 - A bridge started 14:56 survived the 15:08 restart even though the binary had
   been rebuilt at 15:07:42. The v1.9.0 scene ran against the v1.8.1 bridge and
   the feed still carried the removed `hands` field.
 
-**Second, related problem.** In both cases the bridge outlived
-`systemctl --user restart`, which a `KillMode=control-group` unit should not
-allow. Something is escaping the service cgroup — probably the bridge being
-spawned as an Electron child and reparented. The version check below makes the
-symptom visible and self-correcting, but it does not explain this, and it is
-worth investigating separately.
+**A wrong turn worth remembering.** This report originally claimed the bridge was
+escaping its cgroup, on the grounds that it outlived `systemctl --user restart`
+under `KillMode=control-group`. That was wrong. The backend runs in its own
+`terrarium-mood.service`, and restarting the display unit was never going to
+restart a separate dependency. The surprising survival had an ordinary
+explanation, and looking for an exotic one cost time.
 
-**How to detect it.** The bridge should never be older than the service:
-
-```bash
-systemctl --user show -p ActiveEnterTimestamp digital-terrarium.service
-pgrep -x digital-terrari | xargs -r ps -o pid,etime,args -p
-```
-
-**How to clear it.** Stop the unit, kill the bridge *by PID*, then start:
+**Manual recovery (pre-fix).** Superseded by the automatic recovery path; kept
+only for an unmanaged backend on a custom address, which still fails visibly and
+must be stopped by whoever started it.
 
 ```bash
 systemctl --user stop digital-terrarium.service
 pgrep -x digital-terrari | xargs -r kill
 systemctl --user start digital-terrarium.service
 ```
-
-**Proposed fix.** Report the package version from `/api/health`, have
-`bridgeIsRunning()` return false when it does not match Electron's own version,
-and have `ensureBridge()` shut a mismatched bridge down before spawning rather
-than racing it for the port. Add a test that a mismatched bridge is rejected.
 
 ## Gotchas
 
