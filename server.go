@@ -85,6 +85,12 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visio
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--fullscreen-state" {
+		if err := json.NewEncoder(os.Stdout).Encode(desktopFullscreenState()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	collector := newCollector("/proc", os.Getuid())
 	collector.update(time.Now())
 	go func() {

@@ -16,6 +16,20 @@ The Go bridge has its own address, `127.0.0.1:8091`, separate from webcam_viewer
 Electron checks the bridge identity before using it. `Ctrl+Alt+Q` quits this
 Electron instance when the shortcut is available.
 
+Desktop mode automatically yields to the foreground fullscreen application on
+X11 (requires `xprop`). Within about 1.5 seconds it hides and unloads the scene
+and releases the camera, stopping animation and face inference. Leaving
+fullscreen, closing the app, or switching to an ordinary window restores the
+scene without taking focus. The visual simulation starts fresh on return;
+Mood Player and the lightweight telemetry/audio backend remain running.
+Maximized windows do not trigger this behavior. Fullscreen apps on inactive
+workspaces do not block the scene. Native Wayland fullscreen detection is not
+supported; detection errors leave the scene enabled and are logged.
+Set `TERRARIUM_FULLSCREEN_PAUSE=0` to opt out. Inspect the detector with
+`./bin/digital-terrarium --fullscreen-state`; transitions appear as
+`[terrarium priority]` in `journalctl --user _COMM=electron` (some Electron
+messages may not appear when filtering only by the display service).
+
 Browser preview: `npm run serve`, then open
 <http://127.0.0.1:8091/terrarium.html>. The selected wallpaper is drawn into the
 canvas every frame in both Electron and browser preview. Restart the app after

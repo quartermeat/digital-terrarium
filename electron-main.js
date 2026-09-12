@@ -5,7 +5,8 @@ const run = promisify(execFile);
 const { readHealth, ensureBridge: ensureVersionedBridge } = require('./bridge-lifecycle.cjs');
 
 const interfaceUrl = 'http://' + (process.env.TERRARIUM_ADDRESS || '127.0.0.1:8091') + '/';
-let bridgeProcess, visionWindow;
+let bridgeProcess, visionWindow, sceneWindow, priorityTimer;
+let priorityPaused = false, quitting = false, priorityError = '';
 const terrarium = process.argv.includes('--terrarium');
 
 app.on('gpu-info-update', () => {
@@ -59,6 +60,7 @@ async function createWindow() {
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
+  sceneWindow = window;
   window.once('ready-to-show', () => {
     if (terrarium) {
       // Keep the ecology as the final visual layer while forwarding pointer
@@ -78,6 +80,52 @@ async function createWindow() {
   }
 }
 
+// Unload both renderers instead of relying on Chromium background throttling:
+// this stops animation, stream callbacks, inference, and camera capture.
+async function setFullscreenPriority(pause, windowID) {
+  if (quitting || sceneWindow.isDestroyed() || pause === priorityPaused) return;
+  if (pause) {
+    sceneWindow.hide();
+    visionWindow?.destroy();
+    priorityPaused = true;
+    await sceneWindow.loadURL('about:blank');
+    console.log('[terrarium priority] suspended for fullscreen window', windowID);
+  } else {
+    const loading = sceneWindow.loadURL(interfaceUrl + 'terrarium.html');
+    // Show before waiting: a hidden renderer can defer painting/loading.
+    sceneWindow.showInactive();
+    await loading;
+    if (quitting || sceneWindow.isDestroyed()) return;
+    priorityPaused = false;
+    createVisionSource().catch(error => console.error('[terrarium vision]', error));
+    console.log('[terrarium priority] resumed');
+  }
+}
+
+async function checkFullscreenPriority() {
+  try {
+    const { stdout } = await run('./bin/digital-terrarium', ['--fullscreen-state'], {
+      cwd: __dirname, timeout: 2000,
+    });
+    const state = JSON.parse(stdout);
+    const error = state.error || '';
+    if (error !== priorityError) {
+      if (error) console.warn('[terrarium priority]', error);
+      priorityError = error;
+    }
+    // Detection failures fail open so an unavailable display/tool cannot leave
+    // the wallpaper stuck off. A later successful check resumes normal control.
+    await setFullscreenPriority(!error && state.fullscreen === true, state.window);
+  } catch (error) {
+    console.error('[terrarium priority]', error);
+    await setFullscreenPriority(false).catch(error => console.error('[terrarium resume]', error));
+  } finally {
+    if (!quitting && !sceneWindow.isDestroyed()) {
+      priorityTimer = setTimeout(checkFullscreenPriority, 1500);
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     callback(permission === 'media' && webContents.getURL().startsWith(interfaceUrl));
@@ -86,7 +134,15 @@ app.whenReady().then(async () => {
   // Vision is additive: a camera that will not open, or a renderer that fails
   // to load, must leave the ecology running rather than fail app startup.
   createVisionSource().catch(error => console.error('[terrarium vision]', error));
+  if (terrarium && process.env.TERRARIUM_FULLSCREEN_PAUSE !== '0') {
+    checkFullscreenPriority();
+  }
 }).catch(error => { console.error('[terrarium startup]', error); app.exit(1); });
 
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { visionWindow?.destroy(); bridgeProcess?.kill(); });
+app.on('before-quit', () => {
+  quitting = true;
+  clearTimeout(priorityTimer);
+  visionWindow?.destroy();
+  bridgeProcess?.kill();
+});
