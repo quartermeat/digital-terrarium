@@ -204,7 +204,10 @@ function drawAgent(agent,index,hits,dt) {
  }
  state.target=destination.label;
  const speed=1-Math.exp(-dt*(active?28:12));state.x+=(destination.x-state.x)*speed;state.y+=(destination.y-state.y)*speed;
- const x=state.x+index*9,y=state.y-22-index*5;
+ // An agent that is merely alive still coasts: a slow loop around its anchor,
+ // so an idle session reads as present rather than as nothing at all.
+ const coastX=active?0:Math.cos(state.time*.55)*26,coastY=active?0:Math.sin(state.time*.8)*14;
+ const x=state.x+index*9+coastX,y=state.y-22-index*5+coastY;
  const pulse=active?(1+Math.sin(state.time*22))*.5:0;
  const color=agent.phase==='error'?'#ff6f78':agent.phase==='waiting'?'#e0c477':'#80ffc0';
  if(state.flash>0&&Number.isFinite(state.fromX)){
@@ -212,11 +215,14 @@ function drawAgent(agent,index,hits,dt) {
  }
  ctx.save();ctx.translate(x,y);
  // A fast luminous courier: needle body, bright eyes, and rapidly beating wings.
- const angle=Math.atan2(destination.y-state.y,destination.x-state.x);ctx.rotate(Number.isFinite(angle)?angle:0);
- ctx.shadowColor=color;ctx.shadowBlur=active?22+pulse*18:10;ctx.strokeStyle=color;ctx.fillStyle='#071211';ctx.lineWidth=2;
+ // Idle couriers face along their coast, not at a destination they already sit on.
+ const angle=active?Math.atan2(destination.y-state.y,destination.x-state.x)
+  :Math.atan2(Math.cos(state.time*.8)*11.2,-Math.sin(state.time*.55)*14.3);
+ ctx.rotate(Number.isFinite(angle)?angle:0);
+ ctx.shadowColor=color;ctx.shadowBlur=active?22+pulse*18:15;ctx.strokeStyle=color;ctx.fillStyle='#071211';ctx.lineWidth=2;
  ctx.globalAlpha=.18+pulse*.12;dot(0,0,30+pulse*7,color);ctx.globalAlpha=1;
  ctx.beginPath();ctx.moveTo(-23,0);ctx.lineTo(12,-6);ctx.lineTo(23,0);ctx.lineTo(12,6);ctx.closePath();ctx.fill();ctx.stroke();
- const wing=9+pulse*11;
+ const wing=9+(active?pulse*11:Math.sin(state.time*5)*2.5);
  ctx.globalAlpha=.45+pulse*.45;ctx.beginPath();ctx.ellipse(-2,-wing,16,5,-.35,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
  ctx.beginPath();ctx.ellipse(-2,wing,16,5,.35,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
  dot(14,-2.5,2.6,'#edfff6');dot(14,2.5,2.6,'#edfff6');
