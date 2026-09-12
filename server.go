@@ -103,9 +103,15 @@ func main() {
 	mux.HandleFunc("/api/spotify/login", spotify.login)
 	mux.HandleFunc("/api/spotify/callback", spotify.callback)
 	mux.HandleFunc("/api/wallpaper", wallpaperHandler)
-	// Serve only public assets, never repository files or configuration.
+	// Serve only public assets, never repository files or configuration. These
+	// are an ES module graph, so they must never be cached: a viewer holding a
+	// stale copy of one module against a fresh copy of another fails to link
+	// the graph at all, and the scene silently never starts.
 	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs"} {
-		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, name) })
+		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			http.ServeFile(w, r, name)
+		})
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
