@@ -1,6 +1,7 @@
 {
   "clientId": "YOUR_SPOTIFY_CLIENT_ID",
   "enabled": true,
+  "deviceName": "YOUR_COMPUTER_NAME_IN_SPOTIFY",
   "playlists": {
     "calm": ["spotify:playlist:YOUR_CALM_PLAYLIST_ID"],
     "flow": ["spotify:playlist:YOUR_FLOW_PLAYLIST_ID"],

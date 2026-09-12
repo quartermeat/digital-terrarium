@@ -28,7 +28,7 @@ cover crop; slideshows and per-monitor wallpaper selection are not implemented.
 | --- | --- | --- |
 | Electronic process creature | Current user's processes grouped by Linux command name | Speed and brightness follow CPU activity. Size follows summed RSS. Idle groups stop moving. Groups appear/disappear with the sampled process list. |
 | Activity sparks | CPU activity of their process group | Brief upward sparks become more frequent as activity rises. |
-| Electrolyte pool | RAM usage, memory pressure, swap | Fill and rim color follow RAM usage. Waves become agitated with memory stalls and swap traffic. |
+| Electrolyte pool | RAM usage, memory pressure, swap, speaker audio | Fill and rim color follow RAM usage. Lines ripple with the playing waveform and bass, alongside memory stalls and swap traffic. |
 | Circuit root | Mounted local filesystem | Color and height reflect unavailable space. Pulses follow measured block-device reads/writes. |
 | Network port | A non-loopback network interface | Cyan bubbles descend for received bytes; amber bubbles rise for transmitted bytes. |
 
@@ -44,6 +44,13 @@ different programs with identical command names share a creature. RSS is summed
 across the group and may double-count shared pages. Threads and runnable process
 counts are instantaneous samples. Processes that start and exit between samples
 may never appear. Exits are not labeled as crashes.
+
+Music waves use `parec` to monitor the desktop's default speaker output, never
+the microphone. The bridge analyzes 50 ms chunks in memory and exposes level,
+bass energy, and a reduced waveform at `/api/audio`; it does not save audio.
+All sound on that output can affect the well. Silence or an unavailable monitor
+smoothly removes the music motion. Capture retries after a disconnect. Run the
+bridge in the desktop user's audio session (PulseAudio or PipeWire-Pulse).
 
 RAM usage uses `1 - MemAvailable / MemTotal`. Actual memory pressure is PSI
 `some avg10`: the fraction of the last ten seconds during which at least one
@@ -113,13 +120,82 @@ Every 15 seconds, the controller reads the current Spotify playback state. When
 a playing track has 30 seconds or less remaining, it queues one track from the
 current mood playlist. It queues at most once for each current track and does
 nothing while playback is stopped. Mood selection uses machine telemetry only;
-the scene does not analyze audio or animate to Spotify content.
+the memory well separately reacts to the desktop's speaker audio.
+
+Set `TERRARIUM_SPOTIFY_START_ON_LAUNCH=true` to start one mood-selected track
+when the bridge launches. It waits for authorization and the playback device,
+then leaves subsequent pauses alone. `deviceName` in `spotify.json` must match
+the computer's name in Spotify (defaults to the machine hostname). It never
+falls back to a different device. Status includes `startPending`, `lastStarted`,
+and any API error. Playback control requires Spotify Premium.
+The workstation desktop-login service supplies this flag; normal previews do not.
 
 Configuration may instead be supplied with `TERRARIUM_SPOTIFY_ENABLED=true`,
 `TERRARIUM_SPOTIFY_CLIENT_ID`, and comma-separated `TERRARIUM_SPOTIFY_CALM`, `TERRARIUM_SPOTIFY_FLOW`,
 `TERRARIUM_SPOTIFY_BUSY`, and `TERRARIUM_SPOTIFY_CHAOTIC` environment variables.
 
 Measurement reference: [Linux proc documentation](https://www.kernel.org/doc/html/latest/filesystems/proc.html).
+
+## Local agents
+
+Small luminous couriers represent source-neutral local agents. During work they
+dart much faster than process creatures, visiting the named target first and then
+hopping rapidly among live process beings and filesystem roots. A process target
+leads to the matching process creature; a filesystem target leads to the longest
+matching mounted root. Green code fragments mark fast travel and active work.
+Hover to see the agent, phase, detail, and
+resolved destination. Reports older than five seconds disappear rather than
+inventing activity.
+
+Adapters atomically publish one bounded JSON file per agent in
+`~/.local/state/digital-terrarium/agents/`. The schema contains only version, ID,
+display name, timestamp, phase, short detail, and an optional process or filesystem
+target. Prompts, tool arguments, output, credentials, and session content do not
+belong in this interface. The bridge validates and projects fresh reports at
+`GET /api/agents`; malformed or stale reports are ignored.
+
+Preview the visual behavior without an agent runtime:
+
+```bash
+npm run agent:demo
+```
+
+An integration can refresh its state while a run is active:
+
+```bash
+TERRARIUM_AGENT_ID=codex TERRARIUM_AGENT_NAME=Codex \
+  node scripts/agent-activity.mjs publish tool apply_patch filesystem /home/quartermeat/work/digital-terrarium
+node scripts/agent-activity.mjs stop
+```
+
+The publisher can also supervise any local agent or script. It refreshes the
+heartbeat, forwards interruption signals, preserves the child's exit status,
+briefly displays completion or failure, and always removes the state afterward:
+
+```bash
+TERRARIUM_AGENT_ID=worker TERRARIUM_AGENT_NAME='Local worker' \
+  node scripts/agent-activity.mjs run 'system inquiry' process ollama -- \
+  ollama run qwen3-coder:30b 'Summarize current system health'
+```
+
+Valid phases are `idle`, `thinking`, `working`, `tool`, `waiting`, and `error`.
+Active adapters must refresh at least every five seconds. This small protocol is
+intended for Codex wrappers, Ollama-backed workers, and future local agents; it
+does not require a particular agent framework.
+
+The user-level `~/.codex/hooks.json` sends supported Codex lifecycle events to
+`scripts/codex-activity-hook.py`. A detached, per-session heartbeat keeps each
+active Codex operator fresh without reading transcripts, prompts, command
+arguments, or tool results. It records only the documented lifecycle event,
+tool name, working directory or file target, and a hashed session identifier.
+`~/.local/bin/codex` launches the installed CLI normally. If explicitly invoked
+through sudo by full path, it drops back to the desktop account rather than
+granting the entire agent permanent root authority; commands needing elevation
+still use the normal sudo policy.
+
+`digital-terrarium.service` starts the desktop window at login and uses
+`terrarium-mood.service` for the bridge. Ollama may remain available independently
+for on-demand local inference. The graphical terrarium follows the desktop session.
 
 ## Verification
 

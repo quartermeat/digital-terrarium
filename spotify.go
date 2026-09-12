@@ -22,9 +22,10 @@ import (
 const spotifyRedirectURI = "http://127.0.0.1:8091/api/spotify/callback"
 
 type spotifyConfig struct {
-	ClientID  string              `json:"clientId"`
-	Enabled   bool                `json:"enabled"`
-	Playlists map[string][]string `json:"playlists"`
+	ClientID   string              `json:"clientId"`
+	Enabled    bool                `json:"enabled"`
+	DeviceName string              `json:"deviceName,omitempty"`
+	Playlists  map[string][]string `json:"playlists"`
 }
 
 type spotifyToken struct {
@@ -34,28 +35,32 @@ type spotifyToken struct {
 }
 
 type spotifyStatus struct {
-	Configured bool   `json:"configured"`
-	Connected  bool   `json:"connected"`
-	Enabled    bool   `json:"enabled"`
-	Mood       string `json:"mood"`
-	LastQueued string `json:"lastQueued,omitempty"`
-	LastError  string `json:"lastError,omitempty"`
+	Configured   bool   `json:"configured"`
+	Connected    bool   `json:"connected"`
+	Enabled      bool   `json:"enabled"`
+	Mood         string `json:"mood"`
+	LastQueued   string `json:"lastQueued,omitempty"`
+	LastError    string `json:"lastError,omitempty"`
+	StartPending bool   `json:"startPending"`
+	LastStarted  string `json:"lastStarted,omitempty"`
 }
 
 type spotifyController struct {
-	mu          sync.RWMutex
-	config      spotifyConfig
-	token       spotifyToken
-	tokenPath   string
-	apiBase     string
-	client      *http.Client
-	snapshot    func() Ecosystem
-	state       string
-	verifier    string
-	mood        string
-	lastQueued  string
-	lastError   string
-	queuedForID string
+	mu           sync.RWMutex
+	config       spotifyConfig
+	token        spotifyToken
+	tokenPath    string
+	apiBase      string
+	client       *http.Client
+	snapshot     func() Ecosystem
+	state        string
+	verifier     string
+	mood         string
+	lastQueued   string
+	lastError    string
+	queuedForID  string
+	startPending bool
+	lastStarted  string
 }
 
 func loadSpotifyConfig() (spotifyConfig, string, error) {
@@ -95,6 +100,7 @@ func loadSpotifyConfig() (spotifyConfig, string, error) {
 func newSpotifyController(snapshot func() Ecosystem) *spotifyController {
 	config, tokenPath, err := loadSpotifyConfig()
 	s := &spotifyController{config: config, tokenPath: tokenPath, apiBase: "https://api.spotify.com/v1", client: &http.Client{Timeout: 8 * time.Second}, snapshot: snapshot, mood: "calm"}
+	s.startPending = os.Getenv("TERRARIUM_SPOTIFY_START_ON_LAUNCH") == "true"
 	if err != nil {
 		s.lastError = err.Error()
 		return s
@@ -120,7 +126,7 @@ func (s *spotifyController) configured() bool {
 func (s *spotifyController) status() spotifyStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return spotifyStatus{Configured: s.configured(), Connected: s.token.RefreshToken != "", Enabled: s.config.Enabled, Mood: s.mood, LastQueued: s.lastQueued, LastError: s.lastError}
+	return spotifyStatus{Configured: s.configured(), Connected: s.token.RefreshToken != "", Enabled: s.config.Enabled, Mood: s.mood, LastQueued: s.lastQueued, LastError: s.lastError, StartPending: s.startPending, LastStarted: s.lastStarted}
 }
 
 func (s *spotifyController) serveStatus(w http.ResponseWriter, r *http.Request) {
@@ -304,6 +310,9 @@ func (s *spotifyController) api(ctx context.Context, method, path string, body i
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	response, err := s.client.Do(req)
 	if err != nil {
 		return err
@@ -369,6 +378,52 @@ func (s *spotifyController) chooseTrack(ctx context.Context, mood string) (strin
 	return "", "", errors.New("Spotify playlist has no playable tracks")
 }
 
+// startFromMood runs once per opted-in bridge launch, then normal queueing takes over.
+func (s *spotifyController) startFromMood(ctx context.Context, mood string) error {
+	name := s.config.DeviceName
+	if name == "" {
+		name, _ = os.Hostname()
+	}
+	var reply struct {
+		Devices []struct {
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			Restricted bool   `json:"is_restricted"`
+		} `json:"devices"`
+	}
+	if err := s.api(ctx, http.MethodGet, "/me/player/devices", nil, &reply); err != nil {
+		return err
+	}
+	deviceID := ""
+	for _, device := range reply.Devices {
+		if device.Name == name && !device.Restricted && device.ID != "" {
+			if deviceID != "" {
+				return fmt.Errorf("multiple Spotify devices named %q", name)
+			}
+			deviceID = device.ID
+		}
+	}
+	if deviceID == "" {
+		return fmt.Errorf("waiting for Spotify device %q; open Spotify or set deviceName in spotify.json", name)
+	}
+	uri, track, err := s.chooseTrack(ctx, mood)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"uris": []string{uri}, "position_ms": 0})
+	if err != nil {
+		return err
+	}
+	if err := s.api(ctx, http.MethodPut, "/me/player/play?device_id="+url.QueryEscape(deviceID), strings.NewReader(string(body)), nil); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.startPending, s.lastStarted, s.lastError = false, track, ""
+	s.mu.Unlock()
+	log.Printf("Spotify started %q for %s mood", track, mood)
+	return nil
+}
+
 func (s *spotifyController) tick(ctx context.Context) error {
 	status := s.status()
 	if !status.Configured || !status.Connected {
@@ -378,6 +433,9 @@ func (s *spotifyController) tick(ctx context.Context) error {
 	s.mu.Lock()
 	s.mood = mood
 	s.mu.Unlock()
+	if status.StartPending {
+		return s.startFromMood(ctx, mood)
+	}
 	var playback struct {
 		IsPlaying  bool  `json:"is_playing"`
 		ProgressMS int64 `json:"progress_ms"`

@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
  const port = portProbe.address().port;
  await new Promise(resolve => portProbe.close(resolve));
  const address = '127.0.0.1:' + port, url = 'http://' + address;
- bridge = spawn(path.join(root,'bin/digital-terrarium'),[],{cwd:root,env:{...process.env,TERRARIUM_ADDRESS:address},stdio:'ignore'});
+ bridge = spawn(path.join(root,'bin/digital-terrarium'),[],{cwd:root,env:{...process.env,TERRARIUM_ADDRESS:address,TERRARIUM_SPOTIFY_ENABLED:'false'},stdio:'ignore'});
  for(let i=0;i<40;i++) {try{const r=await fetch(url+'/api/health');if(r.ok)break;}catch{}await pause(100);}
  await pause(1100);
  const data = await (await fetch(url+'/api/ecosystem')).json();
@@ -45,12 +45,57 @@ app.whenReady().then(async () => {
   const result={backend:engine.label,idle:creatures[0].x===.5&&creatures[0].y===.5,active:creatures[1].x!==.5||creatures[1].y!==.5};engine.destroy();return result;
  })()`);
  assert.ok(gpu.idle&&gpu.active);
+ // Speaker input moves the well, then fades on silence or capture failure.
+ await window.webContents.executeJavaScript(`
+  window.audioFetch=window.fetch; window.audioMode='playing';
+  window.fetch=(url,opts)=>url==='/api/audio'
+   ? Promise.resolve(new Response(JSON.stringify({available:window.audioMode!=='offline',level:window.audioMode==='playing'?.7:0,bass:.4,waveform:Array(40).fill(.3)})))
+   : window.audioFetch(url,opts);
+  undefined;
+ `);
+ await pause(700);
+ assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicLevel"))>.5);
+ await window.webContents.executeJavaScript("window.audioMode='silent'");await pause(700);
+ assert.ok(Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.musicLevel"))<.02);
+ await window.webContents.executeJavaScript("window.audioMode='offline'");await pause(700);
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.audioAvailable"),'false');
+ await window.webContents.executeJavaScript("window.fetch=window.audioFetch;undefined");
+ // Verify generic agent states without changing the live activity directory.
+ await window.webContents.executeJavaScript(`
+  window.originalFetch=window.fetch;
+  window.agentTestPhase='tool';
+  window.fetch=(url,opts)=>url==='/api/agents'
+   ? Promise.resolve(new Response(JSON.stringify({version:1,sampledAt:new Date().toISOString(),agents:[{
+     version:1,id:'scene-test',name:'Local operator',
+     sampledAt:new Date(Date.now()-(window.agentTestPhase==='stale'?10000:0)).toISOString(),
+     phase:window.agentTestPhase,detail:'reading project',target:{kind:'filesystem',name:'/'}
+   }]})))
+   : window.originalFetch(url,opts);
+  undefined;
+ `);
+ await pause(1000);
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.agentPhase"),'tool');
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.agentCount"),'1');
+ // Hold the courier at its destination for the hover check; active couriers teleport.
+ await window.webContents.executeJavaScript("window.agentTestPhase='waiting'");await pause(700);
+ await window.webContents.executeJavaScript(`{
+  const canvas=document.querySelector('canvas');
+  canvas.dispatchEvent(new PointerEvent('pointermove',{clientX:Number(canvas.dataset.agentX),clientY:Number(canvas.dataset.agentY)}));
+ }`);
+ await pause(100);
+ assert.ok((await window.webContents.executeJavaScript("document.querySelector('#tooltip').textContent")).includes('Local operator / fast agent courier'));
+ fs.writeFileSync('/tmp/digital-terrarium-agent.png',(await window.webContents.capturePage()).toPNG());
+ await window.webContents.executeJavaScript("window.agentTestPhase='idle'");await pause(700);
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.agentPhase"),'idle');
+ await window.webContents.executeJavaScript("window.agentTestPhase='stale'");await pause(700);
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.agentCount"),'0');
+ await window.webContents.executeJavaScript("window.fetch=window.originalFetch;document.querySelector('canvas').dispatchEvent(new PointerEvent('pointerleave'))");
  // A failed bridge must visibly become stale rather than invent activity.
  fs.writeFileSync('/tmp/digital-terrarium-scene.png',(await window.webContents.capturePage()).toPNG());
  bridge.kill();await pause(3500);
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh"),'false');
  const unexpected=errors.filter(message=>!message.includes('ERR_CONNECTION_REFUSED')&&!message.includes('Failed to fetch'));
  assert.deepEqual(unexpected,[]);
- console.log(JSON.stringify({scene,gpu,hover:true,stale:true,processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
+ console.log(JSON.stringify({scene,gpu,hover:true,stale:true,agent:true,processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
  clearTimeout(timeout);finish(0);
 }).catch(error=>{console.error(error);clearTimeout(timeout);finish(1);});

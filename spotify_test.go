@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -82,5 +83,70 @@ func TestSpotifyTickQueuesFromCurrentMood(t *testing.T) {
 	}
 	if queueCalls != 1 {
 		t.Fatal("queued more than once for the same current track")
+	}
+}
+
+func TestSpotifyStartupUsesMoodOnceAndRespectsPause(t *testing.T) {
+	plays := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/me/player/devices":
+			_, _ = w.Write([]byte(`{"devices":[{"id":"phone","name":"Phone"},{"id":"local","name":"Workstation"}]}`))
+		case "/v1/playlists/busy-list/items":
+			_, _ = w.Write([]byte(`{"items":[{"item":{"uri":"spotify:track:chosen","name":"Chosen","artists":[]}}]}`))
+		case "/v1/me/player/play":
+			plays++
+			var body struct {
+				URIs []string `json:"uris"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if r.Method != http.MethodPut || r.URL.Query().Get("device_id") != "local" || r.Header.Get("Content-Type") != "application/json" || len(body.URIs) != 1 || body.URIs[0] != "spotify:track:chosen" {
+				t.Errorf("unexpected playback request: %s %s %+v", r.Method, r.URL, body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/v1/me/player":
+			_, _ = w.Write([]byte(`{"is_playing":false,"progress_ms":0,"item":{"id":"chosen","duration_ms":120000}}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	s := spotifyController{
+		config:  spotifyConfig{ClientID: "client", Enabled: true, DeviceName: "Workstation", Playlists: map[string][]string{"calm": {"calm-list"}, "flow": {"flow-list"}, "busy": {"busy-list"}, "chaotic": {"chaotic-list"}}},
+		token:   spotifyToken{AccessToken: "token", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour).Unix()},
+		apiBase: server.URL + "/v1", client: server.Client(), startPending: true,
+		snapshot: func() Ecosystem { return Ecosystem{CPU: floatPointer(.6)} },
+	}
+	for range 2 {
+		if err := s.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if plays != 1 || s.status().StartPending || s.status().LastStarted != "Chosen" {
+		t.Fatalf("plays=%d status=%+v", plays, s.status())
+	}
+}
+
+func TestSpotifyStartupDoesNotUseAnotherDevice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/me/player/devices" {
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+		_, _ = w.Write([]byte(`{"devices":[{"id":"phone","name":"Phone"}]}`))
+	}))
+	defer server.Close()
+	s := spotifyController{
+		config:  spotifyConfig{DeviceName: "Workstation"},
+		token:   spotifyToken{AccessToken: "token", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour).Unix()},
+		apiBase: server.URL + "/v1", client: server.Client(), startPending: true,
+	}
+	if err := s.startFromMood(context.Background(), "calm"); err == nil {
+		t.Fatal("accepted wrong device")
+	}
+	if !s.startPending {
+		t.Fatal("startup should remain pending")
 	}
 }

@@ -43,7 +43,7 @@ async function ensureBridge() {
 async function createWindow() {
   await ensureBridge();
   const window = new BrowserWindow({
-    ...(terrarium ? { ...screen.getPrimaryDisplay().bounds, type: 'desktop', frame: false, skipTaskbar: true } : {}),
+    ...(terrarium ? { ...screen.getPrimaryDisplay().bounds, type: 'desktop', frame: false, skipTaskbar: true, alwaysOnTop: true } : {}),
     width: terrarium ? screen.getPrimaryDisplay().bounds.width : 1440,
     height: terrarium ? screen.getPrimaryDisplay().bounds.height : 900,
     transparent: true,
@@ -52,7 +52,13 @@ async function createWindow() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.once('ready-to-show', () => {
-    if (terrarium) { window.showInactive(); }
+    if (terrarium) {
+      // Keep the ecology as the final visual layer while forwarding pointer
+      // motion so hover inspection still works without stealing app focus.
+      window.setAlwaysOnTop(true, 'floating');
+      window.setIgnoreMouseEvents(true, { forward: true });
+      window.showInactive();
+    }
     else { window.maximize(); window.show(); }
   });
   await window.loadURL(interfaceUrl + (terrarium ? 'terrarium.html' : ''));

@@ -1,13 +1,18 @@
 import { createCreatureCompute } from './creature-compute.mjs';
 import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, fallbackStep, measured, clamp } from './ecology.mjs';
+import { agentFresh, agentWaypoints } from './agent-activity.mjs';
 
 const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
 const tooltip = document.querySelector('#tooltip');
 const creatures = Array.from({ length: CAPACITY }, emptyCreature);
 let snapshot = null, pending = null, networkError = false, pointer = null;
+let agents = [], agentError = false;
+let audio = null, audioReceived = 0, musicLevel = 0, musicBass = 0, musicPhase = 0;
+const musicWave = Array(40).fill(0);
 let width = innerWidth, height = innerHeight, time = 0, last = 0;
 let compute = null, backend = 'CPU', computeFailed = false;
 const particles = [], accumulators = new Map(), rootPhases = new Map();
+const operatorStates = new Map();
 const wallpaper = new Image();
 let wallpaperReady = false;
 wallpaper.onload = () => { wallpaperReady = true; };
@@ -24,6 +29,29 @@ async function poll() {
  setTimeout(poll, 1000);
 }
 poll();
+async function pollAgents() {
+ try {
+  const response = await fetch('/api/agents', { signal: AbortSignal.timeout(1800), cache: 'no-store' });
+  if (!response.ok) throw Error('Agent activity unavailable');
+  const data = await response.json();
+  if(data.version!==1||!Array.isArray(data.agents))throw Error('Incompatible agent activity');
+  agents=data.agents;agentError=false;
+ } catch { agentError=true; }
+ setTimeout(pollAgents, 500);
+}
+pollAgents();
+async function pollAudio() {
+ try {
+  const response = await fetch('/api/audio', { signal: AbortSignal.timeout(1000), cache: 'no-store' });
+  if (!response.ok) throw Error('Audio unavailable');
+  const data = await response.json();
+  audio = data.available && Number.isFinite(data.level) && Number.isFinite(data.bass)
+   && Array.isArray(data.waveform) && data.waveform.length === 40 && data.waveform.every(Number.isFinite) ? data : null;
+  audioReceived = performance.now();
+ } catch { audio = null; }
+ setTimeout(pollAudio, 50);
+}
+pollAudio();
 createCreatureCompute(CAPACITY).then(value => {
  compute = value; backend = value.label; console.info('Simulation:', backend);
 }).catch(error => { console.warn('CPU simulation:', error.message); });
@@ -70,12 +98,25 @@ function drawMemory(fresh, hits, dt) {
  const pressure=fresh?(memory.pressure??0):0;
  const swapping=fresh?emissionRate((memory.swapInBytesPerSec??0)+(memory.swapOutBytesPerSec??0)):0;
  const agitation=pressure*25+swapping*.3;
+ const sound = audio && performance.now()-audioReceived<500 ? audio : null;
+ const ease = 1-Math.exp(-dt*18);
+ musicLevel += ((sound?.level??0)-musicLevel)*ease;
+ musicBass += ((sound?.bass??0)-musicBass)*ease;
+ musicPhase += dt*(2+musicLevel*9);
+ musicWave.forEach((value,i)=>{musicWave[i]=value+((sound?.waveform[i]??0)-value)*ease;});
+ canvas.dataset.audioAvailable=String(Boolean(sound));
+ canvas.dataset.musicLevel=musicLevel.toFixed(3);
  ctx.save();ctx.clip();
  for(let j=0;j<7;j++) {
-  const points=Array.from({length:33},(_,i)=>[x-rx+i*rx/16,y-ry+j*ry/3+Math.sin(i*.6+time*(.5+agitation)+j)*(1+agitation)]);
-  line(points,color, .7);
+  const points=musicWave.map((sample,i)=>{
+   const p=i/(musicWave.length-1), envelope=Math.sin(p*Math.PI);
+   const ripple=Math.sin(p*12-musicPhase+j*.65)*musicBass*ry*.42;
+   return [x-rx+p*rx*2,y-ry+j*ry/3+Math.sin(i*.6+time*(.5+agitation)+j)*(1+agitation)
+    +envelope*(sample*ry*.55+ripple)];
+  });
+  line(points,color, .7+musicLevel*.8);
  }
- // Liquid fill height represents RAM usage; waves represent measured stalls/swap.
+ // Fill represents RAM; waves combine memory pressure with measured speaker audio.
  if(fresh&&measured(memory.used)) {ctx.fillStyle=color;ctx.globalAlpha=.14;ctx.fillRect(x-rx,y+ry-2*ry*memory.used,2*rx,2*ry*memory.used);}
  ctx.restore();
  hits.push({x,y,rx,ry,text:'MEMORY / electrolyte\nRAM used '+percent(memory.used)+'\nMemory stalls (10 s) '+percent(memory.pressure)+'\nSwap occupied '+bytes(memory.swapBytes)+'\nSwap in '+rate(memory.swapInBytesPerSec)+'\nSwap out '+rate(memory.swapOutBytesPerSec)});
@@ -114,17 +155,13 @@ function drawCreature(c,fresh,hits,dt) {
  const valid=fresh&&measured(c.group.cpu);
  ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(Math.sin(c.heading)*height,Math.cos(c.heading)*width));ctx.globalAlpha=c.alpha;
  const color=valid?'hsl('+c.hue+' 55% '+(40+c.level*40)+'%)':'#687b7a';
- // Chip body, paired sensor ears and short contact feet; no trailing appendage.
+ // Compact floating chip: a single body and status bars, with no animal-like legs.
  ctx.fillStyle='#102b30';ctx.strokeStyle=color;ctx.lineWidth=1.2;
- ctx.beginPath();ctx.ellipse(-s*.15,0,s*.75,s*.43,0,0,Math.PI*2);ctx.fill();ctx.stroke();
- ctx.beginPath();ctx.moveTo(s*.2,-s*.35);ctx.lineTo(s,0);ctx.lineTo(s*.2,s*.35);ctx.closePath();ctx.fill();ctx.stroke();
- const stride=c.level>0?Math.sin(time*(8+24*c.level)+c.phase)*2:0;
- for(const side of [-1,1]) {
-  dot(s*.15,side*s*.45,s*.23,color);dot(s*.15,side*s*.45,s*.12,'#102b30');
-  line([[-s*.5,side*s*.4],[-s*.5+stride,side*s*.62]],color);
-  dot(s*.55,side*s*.13,1.2,valid?'#e3ffe1':'#718883');
- }
- ctx.fillStyle=color;ctx.fillRect(-s*.45,-s*.16,s*.28,s*.32);ctx.restore();
+ ctx.beginPath();ctx.roundRect(-s*.8,-s*.42,s*1.6,s*.84,s*.18);ctx.fill();ctx.stroke();
+ ctx.globalAlpha=.45;ctx.strokeStyle=color;ctx.beginPath();ctx.arc(0,0,s*.62,0,Math.PI*2);ctx.stroke();
+ ctx.globalAlpha=1;ctx.fillStyle=color;ctx.fillRect(-s*.45,-s*.12,s*.22,s*.24);
+ ctx.fillRect(-s*.1,-s*.12,s*.22,s*.24);ctx.fillRect(s*.25,-s*.12,s*.22,s*.24);
+ ctx.restore();
  if(valid)emit('cpu:'+c.group.name,c.level*2,dt,()=>({x,y,vx:0,vy:-12,life:.7,color:'#9ef5b9',kind:'spark'}));
  hits.push({x,y,rx:s+8,ry:s+8,text:c.group.name+' / '+c.group.count+' processes\nCPU '+percent(c.group.cpu)+' of whole machine\nRSS sum '+bytes(c.group.rssBytes)+' (shared pages may repeat)\nThreads '+c.group.threads+' · runnable '+c.group.running+'\n'+(!valid?'Waiting for measurements':c.level>0?'Active':'Resting')});
 }
@@ -137,6 +174,52 @@ function hover(hits,fresh) {
  tooltip.hidden=false;tooltip.style.display='block';
  tooltip.style.left=Math.max(6,Math.min(width-tooltip.offsetWidth-8,pointer.x+16))+'px';
  tooltip.style.top=Math.max(6,Math.min(height-tooltip.offsetHeight-8,pointer.y+16))+'px';
+}
+function drawAgent(agent,index,hits,dt) {
+ if(!agentFresh(agent))return;
+ const route=agentWaypoints(agent,creatures,snapshot?.disks??[],width,height);
+ const active=['thinking','working','tool'].includes(agent.phase);
+ let state=operatorStates.get(agent.id);
+ if(!state){state={x:width*.5,y:height*.48,target:'',time:0,hop:0,flash:0,routeIndex:0};operatorStates.set(agent.id,state);}
+ state.time+=dt;state.hop+=dt;state.flash=Math.max(0,state.flash-dt);
+ if(state.primary!==route[0].label){state.primary=route[0].label;state.routeIndex=0;state.hop=0;}
+ const interval=agent.phase==='tool'?.18:active?.3:Infinity;
+ let jumped=false;
+ if(state.hop>=interval&&route.length>1){state.hop=0;state.routeIndex=(state.routeIndex+1)%route.length;jumped=true;}
+ if(!active)state.routeIndex=0;
+ const destination=route[state.routeIndex%route.length];
+ const distance=Math.hypot(destination.x-state.x,destination.y-state.y);
+ if(jumped&&distance>45){
+  state.fromX=state.x;state.fromY=state.y;state.x=destination.x;state.y=destination.y;state.flash=.14;
+  for(let i=0;i<24&&particles.length<160;i++){
+   const along=Math.random();particles.push({x:state.fromX+(state.x-state.fromX)*along,y:state.fromY+(state.y-state.fromY)*along,vx:(Math.random()-.5)*55,vy:(Math.random()-.5)*55,life:.2+Math.random()*.35,color:'#83ffc1',kind:'code'});
+  }
+ }
+ state.target=destination.label;
+ const speed=1-Math.exp(-dt*(active?28:12));state.x+=(destination.x-state.x)*speed;state.y+=(destination.y-state.y)*speed;
+ const x=state.x+index*9,y=state.y-22-index*5;
+ const pulse=active?(1+Math.sin(state.time*22))*.5:0;
+ const color=agent.phase==='error'?'#ff6f78':agent.phase==='waiting'?'#e0c477':'#80ffc0';
+ if(state.flash>0&&Number.isFinite(state.fromX)){
+  ctx.save();ctx.globalAlpha=state.flash/.14*.55;line([[state.fromX,state.fromY],[x,y]],color,2.5);ctx.restore();
+ }
+ ctx.save();ctx.translate(x,y);
+ // A fast luminous courier: needle body, bright eyes, and rapidly beating wings.
+ const angle=Math.atan2(destination.y-state.y,destination.x-state.x);ctx.rotate(Number.isFinite(angle)?angle:0);
+ ctx.shadowColor=color;ctx.shadowBlur=active?22+pulse*18:10;ctx.strokeStyle=color;ctx.fillStyle='#071211';ctx.lineWidth=2;
+ ctx.globalAlpha=.18+pulse*.12;dot(0,0,30+pulse*7,color);ctx.globalAlpha=1;
+ ctx.beginPath();ctx.moveTo(-23,0);ctx.lineTo(12,-6);ctx.lineTo(23,0);ctx.lineTo(12,6);ctx.closePath();ctx.fill();ctx.stroke();
+ const wing=9+pulse*11;
+ ctx.globalAlpha=.45+pulse*.45;ctx.beginPath();ctx.ellipse(-2,-wing,16,5,-.35,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+ ctx.beginPath();ctx.ellipse(-2,wing,16,5,.35,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+ dot(14,-2.5,2.6,'#edfff6');dot(14,2.5,2.6,'#edfff6');
+ line([[-21,0],[-34-pulse*12,0]],color,1.7);
+ if(state.flash>0){ctx.globalAlpha=state.flash/.14;ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,48-state.flash/.14*18,0,Math.PI*2);ctx.stroke();}
+ ctx.restore();
+ if(active)emit('agent:'+agent.id,6+pulse*8,dt,()=>({x:x+(Math.random()-.5)*22,y:y+30,vx:(Math.random()-.5)*5,vy:-20-Math.random()*20,life:.35+Math.random()*.45,color,kind:'code'}));
+ const phase={idle:'Resting',thinking:'Thinking / local inference',working:'Following active threads',tool:'Using a tool',waiting:'Waiting for direction',error:'Needs attention'}[agent.phase]||agent.phase;
+ hits.push({x,y,rx:48,ry:40,text:agent.name+' / fast agent courier\n'+phase+(agent.detail?'\n'+agent.detail:'')+'\nVisiting: '+destination.label});
+ if(index===0){canvas.dataset.agentPhase=agent.phase;canvas.dataset.agentX=String(x);canvas.dataset.agentY=String(y);canvas.dataset.agentTarget=destination.label;}
 }
 async function frame(stamp) {
  const dt=Math.min((stamp-last)/1000||0,.05);last=stamp;time+=dt;
@@ -158,17 +241,21 @@ async function frame(stamp) {
  const hits=[];
  drawMemory(fresh,hits,dt);drawRoots(fresh,hits,dt);drawNetwork(fresh,hits,dt);
  creatures.forEach(c=>drawCreature(c,fresh,hits,dt));
+ agents.forEach((agent,index)=>drawAgent(agent,index,hits,dt));
+ for(const id of operatorStates.keys())if(!agents.some(agent=>agent.id===id))operatorStates.delete(id);
  for(let i=particles.length-1;i>=0;i--) {
   const p=particles[i];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
   if(p.life<=0){particles.splice(i,1);continue;}
   ctx.globalAlpha=Math.min(1,p.life);
-  if(p.kind==='bubble'){ctx.strokeStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.stroke();}
+   if(p.kind==='bubble'){ctx.strokeStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.stroke();}
+   else if(p.kind==='code'){ctx.fillStyle=p.color;ctx.font='8px monospace';ctx.fillText(Math.random()>.5?'1':'0',p.x,p.y);}
   else {ctx.fillStyle=p.color;ctx.fillRect(p.x-1,p.y-1,2,2);}
  }
  ctx.globalAlpha=1;hover(hits,fresh);
  // Machine-readable diagnostics for local verification; no permanent HUD.
  canvas.dataset.ready='true';canvas.dataset.backend=backend;canvas.dataset.fresh=String(fresh);
  canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);canvas.dataset.gpuFailed=String(computeFailed);
+ canvas.dataset.agentCount=String(agentError?0:agents.filter(agent=>agentFresh(agent)).length);
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
