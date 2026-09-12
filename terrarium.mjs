@@ -1,11 +1,14 @@
 import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, stepCreatures, measured, clamp } from './ecology.mjs';
 import { agentFresh, agentWaypoints } from './agent-activity.mjs';
+import { visionFresh, handTouchPoints, disturbCreature, faceWireOpacity, aspectScale, correctPoints } from './vision.mjs';
+import { FACE_WIRE_EDGES, HAND_WIRE_EDGES } from './vision-topology.mjs';
 
 const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
 const tooltip = document.querySelector('#tooltip');
 const creatures = Array.from({ length: CAPACITY }, emptyCreature);
 let snapshot = null, pending = null, networkError = false, pointer = null;
 let agents = [], agentError = false;
+let vision = null;
 let audio = null, audioReceived = 0, musicLevel = 0, musicBass = 0, musicPhase = 0;
 const musicWave = Array(40).fill(0);
 let width = innerWidth, height = innerHeight, time = 0, last = 0;
@@ -33,6 +36,12 @@ stream.addEventListener('agents', event => {
   agents = data.agents; agentError = false;
  } catch { agentError = true; }
 });
+stream.addEventListener('vision', event => {
+ try {
+  const data = JSON.parse(event.data);
+  vision = visionFresh(data) ? data : null;
+ } catch { vision = null; }
+});
 stream.addEventListener('audio', event => {
  try {
   const data = JSON.parse(event.data);
@@ -43,7 +52,7 @@ stream.addEventListener('audio', event => {
 });
 // EventSource reconnects on its own; until it does, the scene goes stale rather
 // than holding the last reading as though it were current.
-stream.addEventListener('error', () => { networkError = true; agentError = true; audio = null; });
+stream.addEventListener('error', () => { networkError = true; agentError = true; audio = null; vision = null; });
 function resize() {
  width = innerWidth; height = innerHeight;
  const ratio = Math.min(devicePixelRatio, 2);
@@ -238,12 +247,70 @@ function drawAgent(agent,index,hits,dt) {
  hits.push({x,y,rx:48,ry:40,text:agent.name+' / fast agent courier\n'+phase+(agent.detail?'\n'+agent.detail:'')+'\nVisiting: '+destination.label});
  if(index===0){canvas.dataset.agentPhase=agent.phase;canvas.dataset.agentX=String(x);canvas.dataset.agentY=String(y);canvas.dataset.agentTarget=destination.label;}
 }
+// A desktop-level habitat forwards pointer motion but never receives a click,
+// so the camera is the only channel that can actually touch it. Hands are drawn
+// in the same corrected camera space that pushes the creatures: what you see
+// shoving the habitat is exactly what the physics used.
+function visionSpace() {
+ // Re-checked every frame, not only on arrival: a stream that stalls without
+ // erroring must let the hand expire rather than pin it where it was last seen.
+ if(!visionFresh(vision)) return null;
+ const scale=aspectScale(vision.aspect,width/height);
+ return {
+  hands:(vision.hands??[]).map(hand=>({...hand,points:correctPoints(hand.points,scale)})),
+  face:vision.face?{...vision.face,points:correctPoints(vision.face.points,scale)}:null,
+ };
+}
+function touchHabitat(scene,dt) {
+ for(const hand of scene.hands) {
+  const touches=handTouchPoints(hand);
+  if(!touches.length)continue;
+  for(const c of creatures) {
+   if(!c.group)continue;
+   if(disturbCreature(c,touches,dt,hand.speed)>0&&particles.length<160&&Math.random()<hand.speed*dt*6)
+    particles.push({x:c.x*width,y:c.y*height,vx:(Math.random()-.5)*40,vy:(Math.random()-.5)*40,life:.25+Math.random()*.35,color:'#bfffe4',kind:'bubble'});
+  }
+ }
+}
+function drawHands(scene,hits) {
+ for(const hand of scene.hands) {
+  const points=hand.points.map(p=>[p.x*width,p.y*height]);
+  const speed=clamp(hand.speed/2.5);
+  const color='hsl('+(170-speed*46)+' 85% '+(56+speed*24)+'%)';
+  ctx.save();
+  ctx.shadowColor=color;ctx.shadowBlur=9+speed*18;ctx.globalAlpha=.92;
+  for(const [a,b] of HAND_WIRE_EDGES)line([points[a],points[b]],color,1.7);
+  for(const [index,[x,y]] of points.entries())dot(x,y,index%4===0?3.1:2,color);
+  ctx.restore();
+  const palm=points[9];
+  hits.push({x:palm[0],y:palm[1],rx:80,ry:80,text:(hand.side||'Hand')+' hand / camera\n'+(hand.gesture?hand.gesture.replace(/_/g,' '):'no gesture')+'\nSweep speed '+hand.speed.toFixed(2)+' habitat widths per second'});
+ }
+}
+// The face wireframe is a reward for leaning in: it fades up with measured face
+// width rather than snapping on, so approaching the camera feels continuous.
+function drawFace(scene,hits) {
+ const face=scene.face;
+ if(!face)return;
+ const opacity=faceWireOpacity(face.span);
+ if(opacity<=0)return;
+ const points=face.points.map(p=>[p.x*width,p.y*height]);
+ ctx.save();
+ ctx.globalAlpha=opacity*.85;ctx.shadowColor='#7ef7d0';ctx.shadowBlur=10;
+ for(const [a,b] of FACE_WIRE_EDGES)line([points[a],points[b]],'#7ef7d0',1);
+ ctx.globalAlpha=opacity;
+ for(const [x,y] of points)dot(x,y,1,'#d8fff0');
+ ctx.restore();
+ const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+ hits.push({x:(Math.min(...xs)+Math.max(...xs))/2,y:(Math.min(...ys)+Math.max(...ys))/2,rx:(Math.max(...xs)-Math.min(...xs))/2,ry:(Math.max(...ys)-Math.min(...ys))/2,text:'Your face / camera wireframe\nSpan '+(face.span*100).toFixed(0)+'% of frame\nLean closer to sharpen'});
+}
 function frame(stamp) {
  const dt=Math.min((stamp-last)/1000||0,.05);last=stamp;time+=dt;
  if(pending){snapshot=pending;pending=null;syncGroups(creatures,snapshot.processes);const allowed=new Set([...snapshot.processes.map(g=>'cpu:'+g.name),...snapshot.network.flatMap(n=>[n.name+'rx',n.name+'tx'])]);for(const key of accumulators.keys())if(!allowed.has(key))accumulators.delete(key);}
  const fresh=!!snapshot&&!networkError&&Date.now()-Date.parse(snapshot.sampledAt)<5000;
  creatures.forEach(c=>prepareCreature(c,dt,fresh));
  stepCreatures(creatures,dt,time);
+ const scene=visionSpace();
+ if(scene)touchHabitat(scene,dt);
  // Redraw the wallpaper every frame; alpha clearing alone caused desktop trails.
  ctx.clearRect(0,0,width,height);
  ctx.fillStyle='#071719';ctx.fillRect(0,0,width,height);
@@ -256,6 +323,7 @@ function frame(stamp) {
  drawMemory(fresh,hits,dt);drawRoots(fresh,hits,dt);drawNetwork(fresh,hits,dt);
  creatures.forEach(c=>drawCreature(c,fresh,hits,dt));
  agents.forEach((agent,index)=>drawAgent(agent,index,hits,dt));
+ if(scene){drawFace(scene,hits);drawHands(scene,hits);}
  for(const id of operatorStates.keys())if(!agents.some(agent=>agent.id===id))operatorStates.delete(id);
  for(let i=particles.length-1;i>=0;i--) {
   const p=particles[i];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
@@ -270,6 +338,8 @@ function frame(stamp) {
  canvas.dataset.ready='true';canvas.dataset.fresh=String(fresh);
  canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);
  canvas.dataset.agentCount=String(agentError?0:agents.filter(agent=>agentFresh(agent)).length);
+ canvas.dataset.hands=String(scene?scene.hands.length:0);
+ canvas.dataset.face=String(!!scene?.face&&faceWireOpacity(scene.face.span)>0);
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

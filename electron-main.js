@@ -3,7 +3,7 @@ const { spawn } = require('node:child_process');
 const http = require('node:http');
 
 const interfaceUrl = 'http://' + (process.env.TERRARIUM_ADDRESS || '127.0.0.1:8091') + '/';
-let bridgeProcess;
+let bridgeProcess, visionWindow;
 const terrarium = process.argv.includes('--terrarium');
 
 app.on('gpu-info-update', () => {
@@ -40,6 +40,19 @@ async function ensureBridge() {
   throw new Error('Local interface bridge did not start');
 }
 
+// The camera lives in its own hidden renderer: inference never competes with
+// the habitat's frame budget, and a vision crash cannot take the scene down.
+// Background throttling must stay off or Chromium clamps the detect loop to a
+// frame a second once the window is hidden.
+function createVisionSource() {
+  visionWindow = new BrowserWindow({
+    width: 320, height: 240, show: false, skipTaskbar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  });
+  visionWindow.on('closed', () => { visionWindow = undefined; });
+  return visionWindow.loadURL(interfaceUrl + 'vision.html');
+}
+
 async function createWindow() {
   await ensureBridge();
   const window = new BrowserWindow({
@@ -61,6 +74,9 @@ async function createWindow() {
     }
     else { window.maximize(); window.show(); }
   });
+  // A hidden window still counts for window-all-closed, so the vision source
+  // has to go when the scene does or the app would never quit.
+  window.on('closed', () => visionWindow?.destroy());
   await window.loadURL(interfaceUrl + (terrarium ? 'terrarium.html' : ''));
   if (terrarium) {
     globalShortcut.register('CommandOrControl+Alt+Q', () => app.quit());
@@ -72,7 +88,10 @@ app.whenReady().then(async () => {
     callback(permission === 'media' && webContents.getURL().startsWith(interfaceUrl));
   });
   await createWindow();
+  // Vision is additive: a camera that will not open, or a renderer that fails
+  // to load, must leave the ecology running rather than fail app startup.
+  createVisionSource().catch(error => console.error('[terrarium vision]', error));
 });
 
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => bridgeProcess?.kill());
+app.on('before-quit', () => { visionWindow?.destroy(); bridgeProcess?.kill(); });

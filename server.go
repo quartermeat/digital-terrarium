@@ -21,7 +21,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 // One stream replaces three polling loops. Each source keeps its own cadence,
 // so the viewer sees telemetry at the rate it is actually sampled rather than
 // at whatever rate a client happened to ask.
-func streamHandler(snapshot func() Ecosystem, audio *audioMonitor) http.HandlerFunc {
+func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visionHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -53,7 +53,10 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor) http.HandlerF
 		defer agents.Stop()
 		sound := time.NewTicker(50 * time.Millisecond)
 		defer sound.Stop()
-		if !send("ecosystem", snapshot()) || !send("agents", agentActivityPayload()) || !send("audio", audio.frameNow()) {
+		sight := time.NewTicker(50 * time.Millisecond)
+		defer sight.Stop()
+		if !send("ecosystem", snapshot()) || !send("agents", agentActivityPayload()) ||
+			!send("audio", audio.frameNow()) || !send("vision", vision.frameNow()) {
 			return
 		}
 		for {
@@ -70,6 +73,10 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor) http.HandlerF
 				}
 			case <-sound.C:
 				if !send("audio", audio.frameNow()) {
+					return
+				}
+			case <-sight.C:
+				if !send("vision", vision.frameNow()) {
 					return
 				}
 			}
@@ -92,13 +99,16 @@ func main() {
 	go spotify.run(spotifyContext)
 	audio := &audioMonitor{}
 	go audio.run(spotifyContext)
+	vision := &visionHub{}
 	mux.HandleFunc("/api/audio", audio.serve)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"app": "digital-terrarium", "telemetryVersion": 1})
 	})
 	mux.HandleFunc("/api/ecosystem", collector.serve)
 	mux.HandleFunc("/api/agents", agentActivityHandler)
-	mux.HandleFunc("/api/stream", streamHandler(collector.current, audio))
+	mux.HandleFunc("/api/stream", streamHandler(collector.current, audio, vision))
+	mux.HandleFunc("/api/vision", vision.serve)
+	mux.HandleFunc("/api/vision-model", visionModelHandler)
 	mux.HandleFunc("/api/spotify/status", spotify.serveStatus)
 	mux.HandleFunc("/api/spotify/login", spotify.login)
 	mux.HandleFunc("/api/spotify/callback", spotify.callback)
@@ -107,12 +117,18 @@ func main() {
 	// are an ES module graph, so they must never be cached: a viewer holding a
 	// stale copy of one module against a fresh copy of another fails to link
 	// the graph at all, and the scene silently never starts.
-	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs"} {
+	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs",
+		"vision.html", "vision-source.mjs", "vision.mjs", "vision-topology.mjs"} {
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			http.ServeFile(w, r, name)
 		})
 	}
+	// The vision renderer needs the MediaPipe runtime and its wasm over http:
+	// getUserMedia requires a secure context, which a file:// page is not. Only
+	// this one package directory is exposed, never the wider dependency tree.
+	mux.Handle("/vendor/tasks-vision/", http.StripPrefix("/vendor/tasks-vision/",
+		http.FileServer(http.Dir("node_modules/@mediapipe/tasks-vision"))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)

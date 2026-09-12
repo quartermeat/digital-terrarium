@@ -265,11 +265,60 @@ not replay startup playback, because the bridge records that in
 Ollama may remain available independently for on-demand local inference. The
 graphical terrarium follows the desktop session.
 
+## Camera input
+
+The habitat sits at desktop level and forwards pointer motion without ever
+receiving a click, so the camera is the only channel that can actually touch it.
+Hands become a physical presence in the ecology and, when you lean in, a
+wireframe of your face is drawn over the scene.
+
+Vision runs in its own hidden Electron renderer, never in the window that draws
+the scene: MediaPipe inference must not compete with the habitat's frame budget,
+and a vision failure cannot take the ecology down with it. That renderer owns the
+camera, posts landmarks to `POST /api/vision`, and the bridge republishes them as
+a `vision` event on `/api/stream` beside `ecosystem`, `agents`, and `audio`.
+
+- **Hands** push nearby creatures aside. A hand resting in frame barely nudges
+  them; a hand sweeping through shoves, because speed scales the force. The palm
+  and five fingertips are the parts that touch; the other landmarks only draw the
+  wireframe, which is painted in the same corrected camera space that drove the
+  physics, so what you see shoving the habitat is exactly what moved it.
+- **Your face** appears as a 136-point wireframe once it fills more than a
+  quarter of the camera's width, fading up to full at 38%. An ordinary seated
+  distance measures about 21% on this workstation, so shifting in the chair will
+  not summon it — you have to lean in. Only the landmarks the wireframe actually
+  draws are transmitted; the full 478-point mesh would triple the payload and
+  never be rendered.
+- Camera space is 16:9 and the habitat is as wide as the desktop, so x is scaled
+  about the centre to keep hands and faces in proportion. The cost is that the
+  outer margin of a very wide screen sits outside camera reach, which is honest:
+  the camera genuinely cannot see there.
+
+The camera stays open while the terrarium runs, and inference is idle-throttled:
+roughly 24 detections a second while a hand or a near face is in frame, dropping
+to four a second when nothing is, so an empty room costs almost nothing. Hands
+and faces expire half a second after the last report, so a stopped feed leaves
+nothing pinned to the scene rather than a phantom hand.
+
+The two MediaPipe models total 12 MiB. The bridge fetches each once on first
+request and serves the cached copy from `~/.cache/digital-terrarium/` afterwards,
+so a restart without a network still starts vision. `POST /api/vision` accepts
+loopback requests only, caps the body, validates every landmark, and stamps
+arrival time itself so a skewed renderer clock cannot decide freshness.
+
+Wireframe topology is generated from the installed MediaPipe package rather than
+hand-transcribed. After changing the `@mediapipe/tasks-vision` version, run:
+
+```bash
+node scripts/generate-vision-topology.mjs
+```
+
 ## Verification
 
 ```bash
 npm test
 npm run test:scene
+npm run test:vision
 ```
 
 The first command tests telemetry parsing, rate baselines, counter resets, PID
@@ -284,3 +333,15 @@ the real paths rather than stubbed in the page: agents through an isolated
 same raw PCM shape as `parec` so capture and analysis run for real. It writes
 local previews to `/tmp/digital-terrarium-scene.png` and
 `/tmp/digital-terrarium-agent.png`, then closes its own processes.
+
+Camera input is driven the same way: the scene check posts synthetic hand and
+face landmarks to the real `/api/vision` and asserts that hands appear, that they
+push nearby creatures but not distant ones, that the face wireframe stays hidden
+at a seated distance and appears when leaned in, and that both vanish once the
+feed stops. It saves `/tmp/digital-terrarium-vision.png`.
+
+`npm run test:vision` is the one check that needs hardware and a person: it opens
+the real camera, loads both models, and reports what it actually saw over twelve
+seconds (`npm run test:vision 30` to watch for longer), saving the richest moment
+to `/tmp/digital-terrarium-camera.png`. It reports rather than asserts a subject,
+exiting non-zero only when the camera never opened.
