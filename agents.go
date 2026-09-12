@@ -81,15 +81,20 @@ func readAgentActivities(directory string, now time.Time) []AgentActivity {
 	return out
 }
 
-func agentActivityHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func agentActivityPayload() map[string]any {
 	home, _ := os.UserHomeDir()
 	directory := os.Getenv("TERRARIUM_AGENT_STATE_DIR")
 	if directory == "" {
 		directory = filepath.Join(home, ".local", "state", "digital-terrarium", "agents")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "sampledAt": time.Now(), "agents": readAgentActivities(directory, time.Now())})
+	now := time.Now()
+	return map[string]any{"version": 1, "sampledAt": now, "agents": readAgentActivities(directory, now)}
+}
+
+func agentActivityHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, agentActivityPayload())
 }

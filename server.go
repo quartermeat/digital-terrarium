@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,65 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 		log.Print(err)
 	}
 }
+// One stream replaces three polling loops. Each source keeps its own cadence,
+// so the viewer sees telemetry at the rate it is actually sampled rather than
+// at whatever rate a client happened to ask.
+func streamHandler(snapshot func() Ecosystem, audio *audioMonitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		header := w.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-store")
+		header.Set("Connection", "keep-alive")
+		send := func(event string, payload any) bool {
+			body, err := json.Marshal(payload)
+			if err != nil {
+				return false
+			}
+			if _, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); err != nil {
+				return false
+			}
+			flusher.Flush()
+			return true
+		}
+		ecosystem := time.NewTicker(time.Second)
+		defer ecosystem.Stop()
+		agents := time.NewTicker(500 * time.Millisecond)
+		defer agents.Stop()
+		sound := time.NewTicker(50 * time.Millisecond)
+		defer sound.Stop()
+		if !send("ecosystem", snapshot()) || !send("agents", agentActivityPayload()) || !send("audio", audio.frameNow()) {
+			return
+		}
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ecosystem.C:
+				if !send("ecosystem", snapshot()) {
+					return
+				}
+			case <-agents.C:
+				if !send("agents", agentActivityPayload()) {
+					return
+				}
+			case <-sound.C:
+				if !send("audio", audio.frameNow()) {
+					return
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	collector := newCollector("/proc", os.Getuid())
 	collector.update(time.Now())
@@ -38,6 +98,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/ecosystem", collector.serve)
 	mux.HandleFunc("/api/agents", agentActivityHandler)
+	mux.HandleFunc("/api/stream", streamHandler(collector.current, audio))
 	mux.HandleFunc("/api/spotify/status", spotify.serveStatus)
 	mux.HandleFunc("/api/spotify/login", spotify.login)
 	mux.HandleFunc("/api/spotify/callback", spotify.callback)

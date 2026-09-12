@@ -16,40 +16,34 @@ let wallpaperReady = false;
 wallpaper.onload = () => { wallpaperReady = true; };
 wallpaper.src = '/api/wallpaper';
 
-async function poll() {
+// One event stream carries all three feeds, each pushed at the cadence the
+// bridge actually samples it, instead of three polling loops guessing at it.
+const stream = new EventSource('/api/stream');
+stream.addEventListener('ecosystem', event => {
  try {
-  const response = await fetch('/api/ecosystem', { signal: AbortSignal.timeout(1800), cache: 'no-store' });
-  if (!response.ok) throw Error('Telemetry unavailable');
-  const data = await response.json();
+  const data = JSON.parse(event.data);
   if (data.version !== 1 || !Array.isArray(data.processes) || !Array.isArray(data.disks) || !Array.isArray(data.network)) throw Error('Incompatible telemetry');
   pending = data; networkError = false;
  } catch (error) { networkError = true; console.warn(error.message); }
- setTimeout(poll, 1000);
-}
-poll();
-async function pollAgents() {
+});
+stream.addEventListener('agents', event => {
  try {
-  const response = await fetch('/api/agents', { signal: AbortSignal.timeout(1800), cache: 'no-store' });
-  if (!response.ok) throw Error('Agent activity unavailable');
-  const data = await response.json();
-  if(data.version!==1||!Array.isArray(data.agents))throw Error('Incompatible agent activity');
-  agents=data.agents;agentError=false;
- } catch { agentError=true; }
- setTimeout(pollAgents, 500);
-}
-pollAgents();
-async function pollAudio() {
+  const data = JSON.parse(event.data);
+  if (data.version !== 1 || !Array.isArray(data.agents)) throw Error('Incompatible agent activity');
+  agents = data.agents; agentError = false;
+ } catch { agentError = true; }
+});
+stream.addEventListener('audio', event => {
  try {
-  const response = await fetch('/api/audio', { signal: AbortSignal.timeout(1000), cache: 'no-store' });
-  if (!response.ok) throw Error('Audio unavailable');
-  const data = await response.json();
+  const data = JSON.parse(event.data);
   audio = data.available && Number.isFinite(data.level) && Number.isFinite(data.bass)
    && Array.isArray(data.waveform) && data.waveform.length === 40 && data.waveform.every(Number.isFinite) ? data : null;
   audioReceived = performance.now();
  } catch { audio = null; }
- setTimeout(pollAudio, 50);
-}
-pollAudio();
+});
+// EventSource reconnects on its own; until it does, the scene goes stale rather
+// than holding the last reading as though it were current.
+stream.addEventListener('error', () => { networkError = true; agentError = true; audio = null; });
 function resize() {
  width = innerWidth; height = innerHeight;
  const ratio = Math.min(devicePixelRatio, 2);

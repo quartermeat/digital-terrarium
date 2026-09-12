@@ -65,6 +65,15 @@ without directly matching block-device counters.
 
 Go samples once per second and publishes a cached, read-only snapshot at
 `GET /api/ecosystem`. Multiple viewers share the same sampling intervals.
+
+The viewer does not poll. `GET /api/stream` is a Server-Sent Events feed
+carrying all three sources over one connection, each pushed at the cadence the
+bridge actually samples it: `ecosystem` once per second, `agents` twice per
+second, `audio` twenty times per second. That last one is why this exists —
+speaker capture produces a frame every 50 ms, and polling for it meant 20 HTTP
+round trips per second that could only ever sample the feed rather than follow
+it. `GET /api/ecosystem`, `/api/agents` and `/api/audio` remain as one-shot
+reads for scripting and inspection.
 No commands, environment variables, browser content, network destinations, or
 packet contents are collected. Only the current user's process groups are shown;
 memory, network, and disk measurements cover the machine.
@@ -249,5 +258,10 @@ reuse, group identity, unavailable data, visual activity mappings, and Spotify
 mood selection. The scene
 check starts an isolated real Go bridge and a hidden Electron window, verifies
 live telemetry, active/idle movement, hover behavior, stale-data handling,
-and opaque wallpaper redraw. It writes a local preview to
-`/tmp/digital-terrarium-scene.png`, then closes its own processes.
+and opaque wallpaper redraw. Agent phases and speaker audio are driven through
+the real paths rather than stubbed in the page: agents through an isolated
+`TERRARIUM_AGENT_STATE_DIR` the check writes files into, and audio through
+`TERRARIUM_AUDIO_COMMAND` pointed at `scripts/test-speaker.mjs`, which emits the
+same raw PCM shape as `parec` so capture and analysis run for real. It writes
+local previews to `/tmp/digital-terrarium-scene.png` and
+`/tmp/digital-terrarium-agent.png`, then closes its own processes.

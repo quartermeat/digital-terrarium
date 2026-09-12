@@ -7,7 +7,9 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,8 +48,19 @@ func analyzeAudio(pcm []byte, low *float64) audioFrame {
 	f.Bass = math.Min(1, math.Sqrt(bass/float64(n))*4)
 	return f
 }
+// Speaker capture runs an external recorder. The command is overridable so a
+// test can feed synthetic PCM through the real analysis path; fields are split
+// on whitespace and executed directly, never through a shell.
+func captureCommand() []string {
+	if value := strings.Fields(os.Getenv("TERRARIUM_AUDIO_COMMAND")); len(value) > 0 {
+		return value
+	}
+	return []string{"parec", "--device=@DEFAULT_MONITOR@", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=50", "--client-name=Terrarium music waves"}
+}
+
 func (a *audioMonitor) capture(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "parec", "--device=@DEFAULT_MONITOR@", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=50", "--client-name=Terrarium music waves")
+	command := captureCommand()
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -85,12 +98,16 @@ func (a *audioMonitor) run(ctx context.Context) {
 		}
 	}
 }
-func (a *audioMonitor) serve(w http.ResponseWriter, r *http.Request) {
+func (a *audioMonitor) frameNow() audioFrame {
 	a.mu.RLock()
 	frame := a.frame
 	a.mu.RUnlock()
 	if time.Since(frame.SampledAt) > time.Second {
-		frame = audioFrame{}
+		return audioFrame{}
 	}
-	writeJSON(w, http.StatusOK, frame)
+	return frame
+}
+
+func (a *audioMonitor) serve(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.frameNow())
 }
