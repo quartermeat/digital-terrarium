@@ -265,10 +265,10 @@ not replay startup playback, because the bridge records that in
 Ollama may remain available independently for on-demand local inference. The
 graphical terrarium follows the desktop session.
 
-## Electric skull
+## The grey
 
-Lean toward the camera and your skull comes up over the habitat, drawn in
-crackling wire. Sit back and it is gone. The camera does nothing else: it is a
+Lean toward the camera and a grey's head comes up over the habitat, drawn in
+glowing wire. Sit back and it is gone. The camera does nothing else: it is a
 spectacle, not a control surface.
 
 Vision runs in its own hidden Electron renderer, never in the window that draws
@@ -277,57 +277,62 @@ and a vision failure cannot take the ecology down with it. That renderer owns th
 camera, posts landmarks to `POST /api/vision`, and the bridge republishes them as
 a `vision` event on `/api/stream` beside `ecosystem`, `agents`, and `audio`.
 
-What makes it read as bone rather than as a face:
+The head is **derived from** the tracked face, never traced from it. Tracing the
+mesh faithfully produces a human face, which is the one thing it must not be:
 
-- **Eyebrows and lips are never drawn.** Both are soft tissue, and drawing them
-  is what makes a wireframe look like a mask. The brow line is used only to seat
-  the top of each orbit and to spring the cranial vault; the mouth ring only to
-  place the teeth.
-- **The vault is derived, not measured.** MediaPipe's face oval stops at the
-  hairline, which is skin, and gives a flat-topped slab. The cranium is sprung
-  from the brow line and carried higher and rounder than the oval ever goes, then
-  closed with the measured jaw into a single filled outline.
-- **Orbits, not eyes.** An eye contour traces the lid, which is far tighter than
-  the bone around it, and an almond hole reads as an eye however brightly it is
-  drawn. Each socket is grown about the lid's own centre, pulled toward a circle
-  of its mean radius, and lifted to sit under the brow ridge. An ember burns deep
-  inside, drifting a little toward where the eye actually points.
-- **The nasal aperture is derived** as an inverted heart hanging between the
-  orbits and stopping clear of the teeth, because the mesh has none.
-- **Teeth are a band of bone**, wider than the lips that normally cover them and
-  drawn back from the full lip height, split by one bright seam between the jaws.
-- **It crackles.** Every edge is re-jittered each frame, brightness carries a
-  mains flicker, and bolts crawl between neighbouring points on the outline.
-  Bolts are anchored by index rather than by coordinate, so they stay on the
-  skull as it moves; a chord straight across the face would read as a scratch on
-  the screen rather than as electricity on bone.
+- **The cranium is inverted.** MediaPipe's face oval measures skin over a human
+  skull — widest at the cheeks, with a jaw as broad as the brow. A grey is the
+  other way round: a vault that carries far above the eyes and is widest above
+  them, tapering to a small chin. So the head is built from the oval's extent
+  rather than its outline, and more of it sits above the widest line than below.
+- **The chin is a rounded point**, not an apex. A single point gives a spade.
+- **The eyes are the signature**, and they are sized against the derived cranium
+  rather than the human face underneath — a grey's eyes are a fraction of its
+  skull, not of your face. Each is a lopsided teardrop, pointed at the inner
+  corner and deepest toward the outer third, slanting up and out. A symmetric
+  lens reads as a cartoon eye. They are *positioned* on the real tracked eyes, so
+  turning your head turns theirs.
+- **The eye fill kills the glow first.** A lit shadow bleeds through the fill and
+  turns a black eye grey, which is the one colour it must not be. One highlight
+  high on the outer curve is what makes it read as wet rather than as a hole cut
+  in the head.
+- **No nose and no lips**: two derived nostril slits and a short bowed seam. The
+  mesh measures a human face that has neither.
+- **The electricity is the habitat's, not the creature's.** A grey has smooth
+  skin, so the outline is stroked cleanly; bolts crawl between neighbouring
+  points on it, anchored by index so they stay on the head as it moves. A chord
+  straight across the face would read as a scratch on the screen.
 
-The skull fades up with the measured face width from a quarter of the camera's
+Only the 68 landmarks the head is built from are transmitted — the face oval's
+ring and both eye rings. Brows, lips and irises are measured by the model but
+never drawn, so they never travel, and the full 478-point mesh would be a far
+larger payload that is never rendered.
+
+The head fades up with the measured face width from a quarter of the camera's
 width to full at 32%. Measured live on this workstation, an ordinary seated
 distance reads 22% and a deliberate lean reaches 33%, so shifting in the chair
-will not summon a skull, but a comfortable lean brings it fully up.
+will not summon a grey, but a comfortable lean brings it fully up.
 
 Camera space is 16:9 and the habitat is as wide as the desktop, so x is scaled
-about the centre to keep the skull in proportion. The cost is that the outer
+about the centre to keep the head in proportion. The cost is that the outer
 margin of a very wide screen sits outside camera reach, which is honest: the
 camera genuinely cannot see there.
 
 The camera stays open while the terrarium runs, and inference is idle-throttled:
 roughly 24 detections a second while a near face is in frame, dropping to four a
-second when none is, so an empty room costs almost nothing. The skull expires
-half a second after the last report, so a stopped feed leaves nothing pinned to
-the scene.
+second when none is, so an empty room costs almost nothing. The head expires half
+a second after the last report, so a stopped feed leaves nothing pinned to the
+scene.
 
-Only the 136 landmarks the skull actually draws are transmitted; the full
-478-point mesh would triple the payload and never be rendered. The model is
-3.6 MiB, fetched once on first request and served from
+The model is 3.6 MiB, fetched once on first request and served from
 `~/.cache/digital-terrarium/` afterwards, so a restart without a network still
 starts vision. `POST /api/vision` accepts loopback requests only, caps the body,
 validates every landmark, and stamps arrival time itself so a skewed renderer
 clock cannot decide freshness.
 
 Topology is generated from the installed MediaPipe package rather than
-hand-transcribed. After changing the `@mediapipe/tasks-vision` version, run:
+hand-transcribed. After changing the `@mediapipe/tasks-vision` version, or the
+set of parts the head is built from, run:
 
 ```bash
 node scripts/generate-vision-topology.mjs
@@ -355,12 +360,12 @@ local previews to `/tmp/digital-terrarium-scene.png` and
 `/tmp/digital-terrarium-agent.png`, then closes its own processes.
 
 The camera is driven the same way: the scene check posts synthetic landmarks to
-the real `/api/vision` and asserts that the skull stays hidden at a seated
+the real `/api/vision` and asserts that the head stays hidden at a seated
 distance, appears when leaned in, vanishes once the feed stops, and that the
-derived geometry holds — sockets open outward from the lid without drifting off
-the eye, a fully rounded socket has a single radius, nine teeth are divided by
-eight seams, and the vault closes into a jaw. It saves
-`/tmp/digital-terrarium-skull.png`.
+derived geometry holds — the cranium carries above the measured face and
+outweighs what is below it, the chin rises, the eyes slant up and out and mirror
+each other, and only drawn parts travel over the feed. It saves
+`/tmp/digital-terrarium-head.png`.
 
 `npm run test:vision` is the one check that needs hardware and a person: it opens
 the real camera, loads the model, and reports what it actually saw over twelve
@@ -369,10 +374,10 @@ asserts a subject, exiting non-zero only when the camera never opened. It saves
 the closest moment's landmarks to `/tmp/digital-terrarium-face.json`.
 
 ```bash
-npm run skull:replay -- 0.30
+npm run head:replay -- 0.30
 ```
 
 replays that captured face at any span and screenshots the scene at the primary
-display's own aspect. Judging the skull otherwise means a person holding still in
+display's own aspect. Judging the head otherwise means a person holding still in
 front of a camera at an exact distance while someone else reads the screen; a
 replay at the wrong aspect judges proportions the scene never draws.

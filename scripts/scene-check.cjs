@@ -90,55 +90,63 @@ app.whenReady().then(async () => {
  // cannot lean into a camera, so synthetic landmarks drive the genuine feed the
  // same way synthetic PCM drives speaker capture above.
  const postVision = body => fetch(url+'/api/vision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- // A ring of landmarks is not a face, but it exercises every path the skull
- // draws: rings to fill, edges to stroke, and a span that gates the reveal.
+ // A ring of landmarks is not a face, but it exercises every path the head
+ // derives: an extent to build a cranium from, eye positions to seat the eyes
+ // on, and a span that gates the reveal.
  const faceAt = span => ({score:1,span,
-  points:Array.from({length:136},(_,i)=>({x:.5+Math.cos(i/136*Math.PI*2)*span/2,y:.5+Math.sin(i/136*Math.PI*2)*span*.65}))});
+  points:Array.from({length:68},(_,i)=>({x:.5+Math.cos(i/68*Math.PI*2)*span/2,y:.5+Math.sin(i/68*Math.PI*2)*span*.65}))});
  const dataset = key => window.webContents.executeJavaScript(`document.querySelector('canvas').dataset.${key}`);
  let visionBody={version:1,available:true,aspect:16/9,camera:'scene-check',face:faceAt(.14)};
- // The skull expires in half a second by design, so the feed has to keep reporting.
+ // The head expires in half a second by design, so the feed has to keep reporting.
  const visionFeed=setInterval(()=>postVision(visionBody).catch(()=>{}),100);
- // Sitting back shows nothing; leaning in brings the skull up.
+ // Sitting back shows nothing; leaning in brings the head up.
  await pause(600);
- assert.equal(await dataset('skull'),'false');
+ assert.equal(await dataset('head'),'false');
  visionBody={...visionBody,face:faceAt(.34)};
  await pause(400);
- assert.equal(await dataset('skull'),'true');
- fs.writeFileSync('/tmp/digital-terrarium-skull.png',(await window.webContents.capturePage()).toPNG());
- // Geometry the skull is built from, exercised through the real modules.
- const bone=await window.webContents.executeJavaScript(`(async()=>{
-  const { centroid, expandRing, roundRing, toothBand, nasalCavity, cranialDome, skullSilhouette, faceWireOpacity } = await import('./vision.mjs');
+ assert.equal(await dataset('head'),'true');
+ fs.writeFileSync('/tmp/digital-terrarium-head.png',(await window.webContents.capturePage()).toPNG());
+ // The geometry the head is derived from, exercised through the real modules.
+ const grey=await window.webContents.executeJavaScript(`(async()=>{
+  const { greyHead, alienEye, centroid, faceWireOpacity } = await import('./vision.mjs');
   const { FACE_RINGS } = await import('./vision-topology.mjs');
-  const lid=[{x:10,y:0},{x:0,y:10},{x:-10,y:0},{x:0,y:-10}];
+  const oval=Array.from({length:24},(_,i)=>{
+   const angle=i/24*Math.PI*2;
+   return {x:Math.cos(angle)*50,y:Math.sin(angle)*70+70};
+  });
+  const head=greyHead(oval);
+  const xs=head.map(p=>p.x),ys=head.map(p=>p.y);
+  const widest=head.reduce((best,p)=>Math.abs(p.x)>Math.abs(best.x)?p:best);
+  const eye=alienEye({x:0,y:0},100,40,.42,1);
+  const outer=eye.reduce((best,p)=>p.x>best.x?p:best);
+  const inner=eye.reduce((best,p)=>p.x<best.x?p:best);
   return {
-   socketOutsideLid:expandRing(lid,1.55).every((p,i)=>Math.hypot(p.x,p.y)>Math.hypot(lid[i].x,lid[i].y)),
-   socketCentred:JSON.stringify(centroid(expandRing(lid,1.55)))===JSON.stringify(centroid(lid)),
-   rounded:new Set(roundRing(lid,1).map(p=>Math.round(Math.hypot(p.x,p.y)))).size,
-   teeth:toothBand([{x:0,y:0},{x:10,y:-4},{x:20,y:0},{x:20,y:1},{x:10,y:6},{x:0,y:1}],9).bars.length,
-   cavity:nasalCavity({x:-20,y:0},{x:20,y:0},60).length,
-   vault:cranialDome(FACE_RINGS.cranium[0].map((_,i)=>({x:Math.cos(i)*50,y:Math.sin(i)*70})),-10).length,
-   outline:skullSilhouette(FACE_RINGS.cranium[0].map((_,i)=>({x:Math.cos(i)*50,y:Math.sin(i)*70})),-10).length,
-   rings:FACE_RINGS.cranium[0].length,
+   risesAbove:Math.min(...ys)<Math.min(...oval.map(p=>p.y)),
+   chinRises:Math.max(...ys)<Math.max(...oval.map(p=>p.y)),
+   mostlyCranium:widest.y-Math.min(...ys)>Math.max(...ys)-widest.y,
+   slants:outer.y<inner.y,
+   mirrors:Math.abs(alienEye({x:0,y:0},100,40,.42,-1).reduce((b,p)=>p.x<b.x?p:b).x+outer.x)<1e-9,
+   parts:Object.keys(FACE_RINGS).sort().join(','),
    faded:faceWireOpacity(.28)>0&&faceWireOpacity(.28)<1,
   };
  })()`);
- assert.ok(bone.socketOutsideLid&&bone.socketCentred,'sockets must open outward from the lid');
- assert.equal(bone.rounded,1,'a fully rounded socket must have a single radius');
- assert.equal(bone.teeth,8,'nine teeth are divided by eight seams');
- assert.ok(bone.cavity>=5,'the nasal aperture must be derived');
- assert.ok(bone.vault>=3&&bone.outline>bone.vault,'the vault must close into a jaw');
- assert.equal(bone.rings,36);
- assert.ok(bone.faded,'the skull must fade rather than snap on');
+ assert.ok(grey.risesAbove,'the cranium must carry above the measured face');
+ assert.ok(grey.chinRises,'a grey has little face below the eyes');
+ assert.ok(grey.mostlyCranium,'the cranium must outweigh the face below it');
+ assert.ok(grey.slants,'eyes must slant up and out');
+ assert.ok(grey.mirrors,'the second eye must mirror the first');
+ assert.equal(grey.parts,'cranium,leftEye,rightEye','only drawn parts may travel');
+ assert.ok(grey.faded,'the head must fade rather than snap on');
  // A camera that stops reporting must leave nothing behind.
  clearInterval(visionFeed);
  await pause(900);
- assert.equal(await dataset('skull'),'false');
+ assert.equal(await dataset('head'),'false');
  // A failed bridge must visibly become stale rather than invent activity.
  fs.writeFileSync('/tmp/digital-terrarium-scene.png',(await window.webContents.capturePage()).toPNG());
  bridge.kill();await pause(3500);
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh"),'false');
  const unexpected=errors.filter(message=>!message.includes('ERR_CONNECTION_REFUSED')&&!message.includes('Failed to fetch'));
  assert.deepEqual(unexpected,[]);
- console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,skull:{hidden:true,revealed:true,...bone,expires:true,screenshot:'/tmp/digital-terrarium-skull.png'},processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
+ console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,grey:{hidden:true,revealed:true,...grey,expires:true,screenshot:'/tmp/digital-terrarium-head.png'},processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
  clearTimeout(timeout);finish(0);
 }).catch(error=>{console.error(error);clearTimeout(timeout);finish(1);});

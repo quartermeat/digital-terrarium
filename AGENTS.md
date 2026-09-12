@@ -5,11 +5,12 @@ this project: how to verify it, and the problems known to be open.
 
 ## Verification
 
-`npm test` covers telemetry, ecology, agent activity, and skull geometry.
-`npm run test:scene` drives the real bridge and a real scene with real feeds.
-`npm run test:vision` needs the camera and a person; it saves the closest face it
-sees to `/tmp/digital-terrarium-face.json`, which `npm run skull:replay -- 0.30`
-then replays at the primary display's own aspect. See README.md for detail.
+`npm test` covers telemetry, ecology, agent activity, and the derived head
+geometry. `npm run test:scene` drives the real bridge and a real scene with real
+feeds. `npm run test:vision` needs the camera and a person; it saves the closest
+face it sees to `/tmp/digital-terrarium-face.json`, which
+`npm run head:replay -- 0.30` then replays at the primary display's own aspect.
+See README.md for detail.
 
 ## Known problems
 
@@ -84,7 +85,7 @@ than racing it for the port. Add a test that a mismatched bridge is rejected.
   exit 144 before reaching the bridge. Use `pkill -x digital-terrari` (the
   comm name is truncated to 15 characters) or kill by PID.
 - The camera is an exclusive device. `npm run test:vision` and
-  `npm run skull:replay` cannot open it while the service holds it; stop the
+  `npm run head:replay` cannot open it while the service holds it; stop the
   service first.
 - A bare `go build` in this directory writes `./digital-terrarium`, which is not
   the build output the project uses. `npm run build:bridge` writes `bin/`.

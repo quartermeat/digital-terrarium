@@ -1,9 +1,9 @@
 // Replays a real face captured by scripts/vision-check.cjs into the scene at a
-// chosen span, and screenshots the result. Judging how the skull looks otherwise
+// chosen span, and screenshots the result. Judging how the head looks otherwise
 // means a person holding still in front of a camera at an exact distance while
 // someone else reads the screen.
 //   npm run test:vision            # captures /tmp/digital-terrarium-face.json
-//   npm run skull:replay -- 0.30   # renders it at a lean-in span
+//   npm run head:replay -- 0.30    # renders it at a lean-in span
 const { app, BrowserWindow, screen } = require('electron');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
@@ -11,7 +11,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const root = path.join(__dirname, '..');
 const capturePath = process.env.TERRARIUM_FACE ?? '/tmp/digital-terrarium-face.json';
-const output = '/tmp/digital-terrarium-skull-replay.png';
+const output = '/tmp/digital-terrarium-head-replay.png';
 const span = Number(process.argv.find(argument => /^0?\.\d+$/.test(argument)) ?? .3);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let bridge;
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
   webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
  await viewer.loadURL(url + '/terrarium.html');
  await pause(2500);
- const drawn = await viewer.webContents.executeJavaScript("document.querySelector('canvas').dataset.skull");
+ const drawn = await viewer.webContents.executeJavaScript("document.querySelector('canvas').dataset.head");
  fs.writeFileSync(output, (await viewer.webContents.capturePage()).toPNG());
  clearInterval(feed);
  console.log(JSON.stringify({ span, capturedSpan: captured.face.span, drawn: drawn === 'true',

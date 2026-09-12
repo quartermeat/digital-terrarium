@@ -17,7 +17,7 @@ import (
 // scene never pays for inference inside its own frame budget. Coordinates are
 // normalized habitat space like everything else the viewer draws, already
 // mirrored so moving right on camera moves right on screen.
-const visionFaceLandmarks = 136
+const visionFaceLandmarks = 68
 
 type VisionPoint struct {
 	X float64 `json:"x"`

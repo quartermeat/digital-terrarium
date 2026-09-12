@@ -40,112 +40,57 @@ export function centroid(points) {
  };
 }
 
-// Eye contours trace the lid, which is far tighter than the bone around it.
-// Pushing the ring outward from its own centre turns an eye into a socket.
-export function expandRing(points, factor, about = centroid(points)) {
- return points.map(point => ({ x: about.x + (point.x - about.x) * factor, y: about.y + (point.y - about.y) * factor }));
+const quadratic = (from, control, to, t) => ({
+ x: (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * control.x + t * t * to.x,
+ y: (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * control.y + t * t * to.y,
+});
+
+// The face oval measures skin over a human skull: widest at the cheeks, with a
+// jaw as broad as the brow. A grey is the other way round — a cranium that
+// carries far above the eyes and is widest above them, tapering to a small
+// pointed chin — so the head is derived from the oval's extent rather than
+// traced from it. Runs left temple, over the vault, down to the chin and back.
+export function greyHead(ring, samples = 30) {
+ if (!ring?.length || samples < 4) return [];
+ const xs = ring.map(point => point.x), ys = ring.map(point => point.y);
+ const left = Math.min(...xs), right = Math.max(...xs);
+ const top = Math.min(...ys), bottom = Math.max(...ys);
+ const half = (right - left) / 2, middle = (left + right) / 2;
+ if (!(half > 0) || !(bottom > top)) return [];
+ const widest = top + (bottom - top) * .34, wide = half * 1.2;
+ const rise = widest - top + half * 1.3;
+ // A grey is nearly all cranium: the face below the eyes is short, and the chin
+ // is a small rounded point rather than the spade a single apex would give.
+ const chinY = widest + (bottom - widest) * .82, chinHalf = wide * .1;
+ const dome = Array.from({ length: samples + 1 }, (_, index) => {
+  const angle = Math.PI * index / samples;
+  return { x: middle - Math.cos(angle) * wide, y: widest - Math.sin(angle) * rise };
+ });
+ const drop = chinY - widest, jawSamples = Math.max(3, Math.round(samples / 2));
+ const temple = direction => ({ x: middle + wide * direction, y: widest });
+ const chin = direction => ({ x: middle + chinHalf * direction, y: chinY });
+ const control = direction => ({ x: middle + wide * .7 * direction, y: widest + drop * .68 });
+ const taper = (from, to, direction) => Array.from({ length: jawSamples },
+  (_, index) => quadratic(from, control(direction), to, (index + 1) / jawSamples));
+ return [...dome, ...taper(temple(1), chin(1), 1), ...taper(chin(-1), temple(-1), -1)];
 }
 
-// An expanded lid is still lid-shaped, and an almond hole reads as an eye no
-// matter how brightly it is drawn. Pulling the ring toward a circle of its own
-// mean radius gives the blunt, rounded hollow that reads as bone.
-export function roundRing(points, roundness, about = centroid(points)) {
- if (!points?.length) return [];
- const polar = points.map(point => {
-  const dx = point.x - about.x, dy = point.y - about.y;
-  return { angle: Math.atan2(dy, dx), radius: Math.hypot(dx, dy) };
- });
- const mean = polar.reduce((total, point) => total + point.radius, 0) / polar.length;
- const blend = clamp(roundness);
- return polar.map(({ angle, radius }) => {
-  const mixed = radius + (mean - radius) * blend;
-  return { x: about.x + Math.cos(angle) * mixed, y: about.y + Math.sin(angle) * mixed };
- });
-}
-
-// Teeth are a straight band of bone, not a lip line, so the band is derived from
-// the mouth region's extent rather than from its contour. Widening past the lips
-// is deliberate: a jaw is broader than the mouth that covers it.
-export function toothBand(points, count, widen = 1.12, shorten = .78) {
- if (!points?.length || count < 1) return null;
- const xs = points.map(point => point.x), ys = points.map(point => point.y);
- const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
- const half = (Math.max(...xs) - Math.min(...xs)) / 2 * widen;
- // Lips are taller than the teeth behind them, so the band is drawn back
- // toward its own centre line rather than filling the whole mouth.
- const centreY = (Math.min(...ys) + Math.max(...ys)) / 2;
- const reach = (Math.max(...ys) - Math.min(...ys)) / 2 * shorten;
- const top = centreY - reach, bottom = centreY + reach;
- if (!(half > 0) || !(bottom > top)) return null;
- return {
-  left: middle - half, right: middle + half, top, bottom, midline: (top + bottom) / 2,
-  // Interior divisions only: the band's own edges are drawn as its outline.
-  bars: Array.from({ length: count - 1 }, (_, index) => middle - half + half * 2 * (index + 1) / count),
+// The signature feature: a large teardrop slanting up and out, pointed at the
+// inner corner and deepest toward the outer third. A symmetric lens reads as a
+// cartoon eye, so the profile is deliberately lopsided.
+export function alienEye(centre, length, height, tilt, outward = 1, samples = 26) {
+ if (!(length > 0) || !(height > 0) || samples < 4) return [];
+ const half = length / 2, cos = Math.cos(-tilt), sin = Math.sin(-tilt);
+ const place = (along, across) => {
+  const x = along * half, y = across;
+  return { x: centre.x + (x * cos - y * sin) * outward, y: centre.y + (x * sin + y * cos) };
  };
-}
-
-// The face oval stops at the hairline, which is skin: it gives a flat-topped
-// slab rather than a cranium. The vault is sprung from the brow line and carried
-// higher and rounder than the oval ever goes, which is what separates a skull
-// from a mask. Runs left temple to right temple.
-export function cranialDome(ring, browY, samples = 26) {
- if (!ring?.length || samples < 3) return [];
- const xs = ring.map(point => point.x);
- const left = Math.min(...xs), right = Math.max(...xs), half = (right - left) / 2;
- if (!(half > 0)) return [];
- const middle = (left + right) / 2, rise = half * 1.12;
- return Array.from({ length: samples }, (_, index) => {
-  const angle = Math.PI * index / (samples - 1);
-  return { x: middle - Math.cos(angle) * half, y: browY - Math.sin(angle) * rise };
- });
-}
-
-// One closed outline for the whole skull: the derived vault over the top, then
-// the measured jaw of the face oval back around the bottom. Filling one path
-// keeps the bone solid instead of showing a seam where the two meet.
-export function skullSilhouette(ring, browY, samples = 26) {
- const dome = cranialDome(ring, browY, samples);
- if (!dome.length) return [];
- let leftIndex = 0, rightIndex = 0, bottomIndex = 0;
- ring.forEach((point, index) => {
-  if (point.x < ring[leftIndex].x) leftIndex = index;
-  if (point.x > ring[rightIndex].x) rightIndex = index;
-  if (point.y > ring[bottomIndex].y) bottomIndex = index;
- });
- const walk = step => {
-  const path = [];
-  for (let index = rightIndex; ; index = (index + step + ring.length) % ring.length) {
-   path.push(index);
-   if (index === leftIndex || path.length > ring.length) break;
-  }
-  return path;
- };
- // Whichever way round the ring passes the chin is the jaw; the other way is
- // the forehead the vault has already replaced.
- const forward = walk(1);
- const jaw = forward.includes(bottomIndex) ? forward : walk(-1);
- return [...dome, ...jaw.map(index => ring[index])];
-}
-
-// The mesh has no nasal aperture, so it is derived: an inverted heart hanging
-// between the sockets, narrow at the bridge and flaring toward the teeth, the
-// way it sits on a real skull. Derived geometry keeps this correct for any face.
-export function nasalCavity(leftEye, rightEye, teethTop) {
- const bridge = { x: (leftEye.x + rightEye.x) / 2, y: (leftEye.y + rightEye.y) / 2 };
- const drop = teethTop - bridge.y;
- if (!(drop > 0)) return [];
- const half = Math.abs(rightEye.x - leftEye.x) * .27;
- const base = bridge.y + drop * .72;
- // Apex a third of the way down, so the aperture sits below the brow line and
- // stops clear of the teeth rather than running into them.
- return [
-  { x: bridge.x, y: bridge.y + drop * .3 },
-  { x: bridge.x + half * .42, y: bridge.y + drop * .6 },
-  { x: bridge.x + half, y: base },
-  { x: bridge.x + half * .3, y: base + drop * .07 },
-  { x: bridge.x, y: base - drop * .04 },
-  { x: bridge.x - half * .3, y: base + drop * .07 },
-  { x: bridge.x - half, y: base },
-  { x: bridge.x - half * .42, y: bridge.y + drop * .6 },
- ];
+ const profile = along => Math.sqrt(Math.max(0, 1 - along * along)) * (.5 + .25 * (along + 1));
+ const top = [], bottom = [];
+ for (let index = 0; index <= samples; index += 1) {
+  const along = -1 + 2 * index / samples, reach = height / 2 * profile(along);
+  top.push(place(along, -reach));
+  bottom.push(place(along, reach));
+ }
+ return [...top, ...bottom.reverse()];
 }

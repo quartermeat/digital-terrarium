@@ -1,6 +1,6 @@
 {
   "name": "digital-terrarium",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "A GPU-assisted electronic aquarium beneath your desktop windows.",
   "main": "electron-main.js",
   "scripts": {
@@ -11,7 +11,7 @@
     "agent:demo": "node scripts/agent-activity.mjs demo",
     "test:scene": "npm run build:bridge && electron scripts/scene-check.cjs",
     "test:vision": "npm run build:bridge && electron scripts/vision-check.cjs",
-    "skull:replay": "npm run build:bridge && electron scripts/skull-replay.cjs"
+    "head:replay": "npm run build:bridge && electron scripts/head-replay.cjs"
   },
   "license": "ISC",
   "dependencies": {

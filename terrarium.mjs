@@ -1,7 +1,7 @@
 import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, stepCreatures, measured, clamp } from './ecology.mjs';
 import { agentFresh, agentWaypoints } from './agent-activity.mjs';
-import { visionFresh, faceWireOpacity, aspectScale, correctPoints, centroid, expandRing, roundRing, toothBand, nasalCavity, skullSilhouette } from './vision.mjs';
-import { FACE_EDGES, FACE_RINGS } from './vision-topology.mjs';
+import { visionFresh, faceWireOpacity, aspectScale, correctPoints, centroid, greyHead, alienEye } from './vision.mjs';
+import { FACE_RINGS } from './vision-topology.mjs';
 
 const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
 const tooltip = document.querySelector('#tooltip');
@@ -247,9 +247,8 @@ function drawAgent(agent,index,hits,dt) {
  hits.push({x,y,rx:48,ry:40,text:agent.name+' / fast agent courier\n'+phase+(agent.detail?'\n'+agent.detail:'')+'\nVisiting: '+destination.label});
  if(index===0){canvas.dataset.agentPhase=agent.phase;canvas.dataset.agentX=String(x);canvas.dataset.agentY=String(y);canvas.dataset.agentTarget=destination.label;}
 }
-// The camera no longer reaches into the habitat; it hangs a skull over it. A
-// straight run of wire reads as a diagram, so every edge is re-jittered each
-// frame: the skull crackles instead of sitting still.
+// The camera does not reach into the habitat; it hangs a head over it, derived
+// from the tracked face rather than traced from it.
 function visionSpace() {
  // Re-checked every frame, not only on arrival: a stream that stalls without
  // erroring must let the skull expire rather than pin it where it was last seen.
@@ -279,102 +278,81 @@ function ringPath(ring) {
  ctx.beginPath();ring.forEach((point,i)=>i?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));ctx.closePath();
 }
 const discharges=[];
-function drawSkull(face,hits,dt) {
+function drawGrey(face,hits,dt) {
  const opacity=faceWireOpacity(face.span);
  if(opacity<=0)return;
  const points=face.points.map(point=>({x:point.x*width,y:point.y*height}));
  const ring=indices=>indices.map(index=>points[index]);
- const cranium=ring(FACE_RINGS.cranium[0]);
+ const head=greyHead(ring(FACE_RINGS.cranium[0]));
+ if(!head.length)return;
+ const xs=head.map(point=>point.x);
+ const span=Math.max(...xs)-Math.min(...xs),middle=(Math.max(...xs)+Math.min(...xs))/2;
  // Mains hum: a fast flicker under a slower sag, like a tube not quite making
- // contact. Never fully dark, so the skull reads as lit rather than blinking.
+ // contact. Never fully dark, so the head reads as lit rather than blinking.
  const buzz=.76+Math.sin(time*57)*.08+Math.sin(time*13.7)*.06+Math.random()*.1;
  const glow=opacity*buzz;
  const hot='rgba(198,255,250,'+glow+')',wire='rgba(96,232,255,'+glow+')',dim='rgba(58,168,226,'+glow*.7+')';
- const hollow='rgba(0,4,7,'+opacity*.94+')';
  ctx.save();ctx.lineCap='round';
- // Bone before wire: a dark vault gives the skull mass instead of leaving it a
- // net laid flat over the desktop. The brow line springs the cranium, so it is
- // measured before anything is drawn.
- const browY=Math.min(...[...FACE_EDGES.leftBrow,...FACE_EDGES.rightBrow].flat().map(index=>points[index].y));
- const silhouette=skullSilhouette(cranium,browY);
- ringPath(silhouette);ctx.fillStyle='rgba(3,15,21,'+opacity*.7+')';ctx.fill();
- ctx.shadowColor='#5ee6ff';ctx.shadowBlur=20*opacity;
- arcRing(silhouette,wire,2.4,3);
- // Brows and lips are soft tissue and a skull has neither: drawing them is what
- // makes a face. The brow line is used only to seat the top of each socket, and
- // the mouth only to place the teeth.
- const sockets=[],irises=[];
- for(const [lid,iris,brow] of [
-  [FACE_RINGS.leftEye[0],FACE_RINGS.leftIris[0],FACE_EDGES.leftBrow],
-  [FACE_RINGS.rightEye[0],FACE_RINGS.rightIris[0],FACE_EDGES.rightBrow]]) {
-  const lidRing=ring(lid);
-  const centre=centroid(lidRing);
-  // Grow the hollow about the lid's own centre, then lift it under the brow
-  // ridge. Expanding about an offset point would fling the ring away from it
-  // rather than open it out, which is not what an orbit does.
-  const lift=(centre.y-Math.min(...brow.flat().map(index=>points[index].y)))*.5;
-  const seated={x:centre.x,y:centre.y-lift};
-  const socket=roundRing(expandRing(lidRing,2.1),.58).map(point=>({x:point.x,y:point.y-lift}));
-  sockets.push({socket,centre:seated});
-  irises.push(centroid(ring(iris)));
-  ringPath(socket);ctx.fillStyle=hollow;ctx.fill();
-  arcRing(socket,wire,2.1,2.6);
+ // A grey has smooth skin, so the cranium is stroked once and cleanly. Only the
+ // habitat's own electricity crackles, and it crawls the outline rather than
+ // roughening every edge the way bone did.
+ ringPath(head);ctx.fillStyle='rgba(4,17,23,'+opacity*.72+')';ctx.fill();
+ ctx.shadowColor='#5ee6ff';ctx.shadowBlur=22*opacity;
+ arcRing(head,wire,2.4,1.1);
+ // The eyes track the real ones, so turning your head turns theirs, but they
+ // are sized against the derived cranium: a grey's eyes are a fraction of its
+ // skull, not of the human face underneath.
+ const eyes=[centroid(ring(FACE_RINGS.leftEye[0])),centroid(ring(FACE_RINGS.rightEye[0]))];
+ for(const eye of eyes) {
+  const outward=eye.x<middle?-1:1;
+  const seat={x:eye.x+outward*span*.055,y:eye.y+span*.025};
+  const shape=alienEye(seat,span*.5,span*.24,.42,outward);
+  ringPath(shape);
+  // Kill the glow while filling: a lit shadow bleeds through the fill and turns
+  // a black eye grey, which is the one colour it must not be.
+  ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(0,0,0,'+opacity*.97+')';ctx.fill();
+  ctx.shadowBlur=22*opacity;
+  arcRing(shape,wire,1.9,1);
+  // One highlight high on the outer curve is what makes a black eye read as wet
+  // rather than as a hole cut in the head.
+  const gleam=shape[Math.round(shape.length*.36)];
+  ctx.shadowBlur=18*opacity;
+  dot(gleam.x,gleam.y,Math.max(1.4,span*.013),'rgba(226,255,252,'+glow*.85+')');
+  ctx.shadowBlur=22*opacity;
  }
- // An ember deep in each hollow, pulsing out of step with the mains flicker, so
- // the sockets read as lit from within rather than as pupils.
- const ember=(1+Math.sin(time*6.3))*.5;
- for(const [index,{centre}] of sockets.entries()) {
-  const look=irises[index];
-  // Drift the ember toward where the eye actually points, but keep it deep.
-  const at={x:centre.x+(look.x-centre.x)*.45,y:centre.y+(look.y-centre.y)*.45};
-  const radius=Math.max(2,face.span*width*.009)*(.75+ember*.5);
-  ctx.shadowBlur=28*opacity;
-  dot(at.x,at.y,radius*3.2,'rgba(96,232,255,'+opacity*.13*(.5+ember)+')');
-  dot(at.x,at.y,radius,'rgba(226,255,252,'+glow+')');
-  ctx.shadowBlur=20*opacity;
- }
- // Teeth: a straight band of bone across the jaw, wider than the lips that
- // normally cover it, split into upper and lower rows.
- const band=toothBand(ring(FACE_RINGS.mouth[0]),9);
- if(band) {
-  ctx.beginPath();ctx.rect(band.left,band.top,band.right-band.left,band.bottom-band.top);
-  ctx.fillStyle=hollow;ctx.fill();
-  // Two rows of bone rather than a grid: the seam between the jaws is the
-  // bright line, the divisions between teeth only faintly scored.
-  for(const x of band.bars)line([[x,band.top],[x,band.bottom]],dim,1.1);
-  line([[band.left,band.top],[band.right,band.top]],wire,1.5);
-  line([[band.left,band.bottom],[band.right,band.bottom]],wire,1.5);
-  line([[band.left,band.midline],[band.right,band.midline]],hot,1.8);
- }
- // The mesh has no nasal aperture, so it is derived from the bridge between the
- // sockets down toward the teeth.
- const nose=nasalCavity(sockets[0].centre,sockets[1].centre,band?band.top:Math.max(...cranium.map(point=>point.y)));
- if(nose.length) {
-  ringPath(nose);ctx.fillStyle=hollow;ctx.fill();
-  arcRing(nose,dim,1.6,2);
- }
- // A skull that only glows is a diagram; one that discharges is alive. Bolts
- // crawl between neighbouring points on the outline: a chord straight across
- // the face reads as a scratch on the screen, not as electricity on bone.
- if(Math.random()<dt*7&&discharges.length<6) {
-  const from=Math.floor(Math.random()*silhouette.length);
+ const brow=(eyes[0].y+eyes[1].y)/2;
+ const chinY=Math.max(...head.map(point=>point.y));
+ // No nose and no lips: two nostril slits and a short seam, both derived, since
+ // the mesh measures a human face that has neither of these.
+ const mouthY=brow+(chinY-brow)*.66,nostrilY=brow+(chinY-brow)*.44;
+ for(const side of [-1,1])
+  line([[middle+side*span*.028,nostrilY],[middle+side*span*.034,nostrilY+span*.026]],dim,1.6);
+ // A shallow downward bow, not a tick: a straight segment floating on a blank
+ // face reads as a stray mark rather than as a mouth.
+ ctx.beginPath();
+ ctx.moveTo(middle-span*.085,mouthY);
+ ctx.quadraticCurveTo(middle,mouthY+span*.022,middle+span*.085,mouthY);
+ ctx.strokeStyle=hot;ctx.lineWidth=1.7;ctx.stroke();
+ // Electricity is the habitat's, not the creature's: bolts crawl between
+ // neighbouring points on the outline, anchored by index so they stay on the
+ // head as it moves. A chord across the face would read as a screen scratch.
+ if(Math.random()<dt*6&&discharges.length<5) {
+  const from=Math.floor(Math.random()*head.length);
   discharges.push({from,span:2+Math.floor(Math.random()*4),life:.22});
  }
  for(let i=discharges.length-1;i>=0;i--) {
   const bolt=discharges[i];bolt.life-=dt;
   if(bolt.life<=0){discharges.splice(i,1);continue;}
-  // Indices, not coordinates: a bolt stays anchored to the skull as it moves.
-  const a=silhouette[bolt.from%silhouette.length],b=silhouette[(bolt.from+bolt.span)%silhouette.length];
-  const fade=Math.min(1,bolt.life/.22);
-  arcLine(a.x,a.y,b.x,b.y,'rgba(224,255,255,'+opacity*fade+')',2,Math.hypot(b.x-a.x,b.y-a.y)*.9);
+  const a=head[bolt.from%head.length],b=head[(bolt.from+bolt.span)%head.length];
+  arcLine(a.x,a.y,b.x,b.y,'rgba(224,255,255,'+opacity*Math.min(1,bolt.life/.22)+')',2,Math.hypot(b.x-a.x,b.y-a.y)*.9);
   if(particles.length<160&&Math.random()<.5)
    particles.push({x:b.x,y:b.y,vx:(Math.random()-.5)*70,vy:(Math.random()-.5)*70,life:.2+Math.random()*.3,color:'#d6fbff',kind:'spark'});
  }
  ctx.restore();
- const xs=points.map(point=>point.x),ys=points.map(point=>point.y);
- hits.push({x:(Math.min(...xs)+Math.max(...xs))/2,y:(Math.min(...ys)+Math.max(...ys))/2,
-  rx:(Math.max(...xs)-Math.min(...xs))/2,ry:(Math.max(...ys)-Math.min(...ys))/2,
-  text:'Electric skull / camera\nYour face, spanning '+(face.span*100).toFixed(0)+'% of the frame\nLean closer to bring it up'});
+ const ys=head.map(point=>point.y);
+ hits.push({x:middle,y:(Math.min(...ys)+Math.max(...ys))/2,rx:span/2,ry:(Math.max(...ys)-Math.min(...ys))/2,
+  text:'Grey / camera\nYour face, spanning '+(face.span*100).toFixed(0)+'% of the frame\nLean closer to bring it up'});
 }
 function frame(stamp) {
  const dt=Math.min((stamp-last)/1000||0,.05);last=stamp;time+=dt;
@@ -395,7 +373,7 @@ function frame(stamp) {
  drawMemory(fresh,hits,dt);drawRoots(fresh,hits,dt);drawNetwork(fresh,hits,dt);
  creatures.forEach(c=>drawCreature(c,fresh,hits,dt));
  agents.forEach((agent,index)=>drawAgent(agent,index,hits,dt));
- if(face)drawSkull(face,hits,dt);
+ if(face)drawGrey(face,hits,dt);
  for(const id of operatorStates.keys())if(!agents.some(agent=>agent.id===id))operatorStates.delete(id);
  for(let i=particles.length-1;i>=0;i--) {
   const p=particles[i];p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
@@ -410,7 +388,7 @@ function frame(stamp) {
  canvas.dataset.ready='true';canvas.dataset.fresh=String(fresh);
  canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);
  canvas.dataset.agentCount=String(agentError?0:agents.filter(agent=>agentFresh(agent)).length);
- canvas.dataset.skull=String(!!face&&faceWireOpacity(face.span)>0);
+ canvas.dataset.head=String(!!face&&faceWireOpacity(face.span)>0);
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

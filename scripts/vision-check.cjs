@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
  const opacity = span => Math.max(0, Math.min(1, (span - NEAR_SPAN) / (FULL_SPAN - NEAR_SPAN)));
  console.log(JSON.stringify({ state, ...seen,
   minSpan: seen.faceFrames ? seen.minSpan : null,
-  skullOpacity: seen.faceFrames ? `${(opacity(seen.minSpan) * 100).toFixed(0)}%-${(opacity(seen.maxSpan) * 100).toFixed(0)}%` : null,
+  headOpacity: seen.faceFrames ? `${(opacity(seen.minSpan) * 100).toFixed(0)}%-${(opacity(seen.maxSpan) * 100).toFixed(0)}%` : null,
   screenshot: '/tmp/digital-terrarium-camera.png',
   landmarks: seen.faceFrames ? '/tmp/digital-terrarium-face.json' : null,
   problems: problems.slice(0, 5) }, null, 2));

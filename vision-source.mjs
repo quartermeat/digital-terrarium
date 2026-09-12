@@ -55,8 +55,8 @@ function readFace(stamp) {
  const points = FACE_WIRE_INDICES.map(index => mirror(landmarks[index]));
  const xs = points.map(point => point.x);
  const span = Math.max(...xs) - Math.min(...xs);
- // Slight hysteresis below the reveal threshold keeps the wireframe from
- // flickering for someone sitting right at the edge of close enough.
+ // Slight hysteresis below the reveal threshold keeps the head from flickering
+ // for someone sitting right at the edge of close enough.
  if (span < NEAR_SPAN * .85) return null;
  return { score: 1, span: round(Math.min(1, span)), points };
 }
