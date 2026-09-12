@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -148,5 +149,22 @@ func TestSpotifyStartupDoesNotUseAnotherDevice(t *testing.T) {
 	}
 	if !s.startPending {
 		t.Fatal("startup should remain pending")
+	}
+}
+
+func TestStartupPlaybackRunsOncePerSession(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("TERRARIUM_SPOTIFY_START_ON_LAUNCH", "true")
+	t.Setenv("TERRARIUM_SPOTIFY_CONFIG", filepath.Join(t.TempDir(), "spotify.json"))
+	if !newSpotifyController(func() Ecosystem { return Ecosystem{} }).startPending {
+		t.Fatal("first launch of a session must schedule startup playback")
+	}
+	markStartupPlaybackDone()
+	if newSpotifyController(func() Ecosystem { return Ecosystem{} }).startPending {
+		t.Fatal("a restart within the same session must not replay startup playback")
+	}
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if !newSpotifyController(func() Ecosystem { return Ecosystem{} }).startPending {
+		t.Fatal("a new session must play again")
 	}
 }

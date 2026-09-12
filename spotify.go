@@ -97,10 +97,41 @@ func loadSpotifyConfig() (spotifyConfig, string, error) {
 	return config, filepath.Join(dir, "spotify-token.json"), nil
 }
 
+// Startup playback belongs to the login session, not to the process. The bridge
+// restarts on failure, and without this a crash loop would restart the music
+// every time; the marker lives in the runtime directory, which the session
+// clears on logout, so the next login plays again.
+func startupPlaybackMarker() string {
+	runtime := os.Getenv("XDG_RUNTIME_DIR")
+	if runtime == "" {
+		return ""
+	}
+	return filepath.Join(runtime, "digital-terrarium", "startup-playback")
+}
+
+func startupPlaybackDone() bool {
+	marker := startupPlaybackMarker()
+	if marker == "" {
+		return false
+	}
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
+func markStartupPlaybackDone() {
+	marker := startupPlaybackMarker()
+	if marker == "" {
+		return
+	}
+	if os.MkdirAll(filepath.Dir(marker), 0700) == nil {
+		_ = os.WriteFile(marker, nil, 0600)
+	}
+}
+
 func newSpotifyController(snapshot func() Ecosystem) *spotifyController {
 	config, tokenPath, err := loadSpotifyConfig()
 	s := &spotifyController{config: config, tokenPath: tokenPath, apiBase: "https://api.spotify.com/v1", client: &http.Client{Timeout: 8 * time.Second}, snapshot: snapshot, mood: "calm"}
-	s.startPending = os.Getenv("TERRARIUM_SPOTIFY_START_ON_LAUNCH") == "true"
+	s.startPending = os.Getenv("TERRARIUM_SPOTIFY_START_ON_LAUNCH") == "true" && !startupPlaybackDone()
 	if err != nil {
 		s.lastError = err.Error()
 		return s
@@ -420,6 +451,7 @@ func (s *spotifyController) startFromMood(ctx context.Context, mood string) erro
 	s.mu.Lock()
 	s.startPending, s.lastStarted, s.lastError = false, track, ""
 	s.mu.Unlock()
+	markStartupPlaybackDone()
 	log.Printf("Spotify started %q for %s mood", track, mood)
 	return nil
 }

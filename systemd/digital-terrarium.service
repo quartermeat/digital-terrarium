@@ -1,0 +1,20 @@
+[Unit]
+Description=Digital Terrarium desktop ecology
+PartOf=graphical-session.target
+After=graphical-session.target terrarium-mood.service
+Requires=terrarium-mood.service
+# An always-on scene must never be permanently defeated by a burst of restarts.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/quartermeat/work/digital-terrarium
+ExecStart=/home/quartermeat/work/digital-terrarium/node_modules/.bin/electron . --terrarium
+# always, not on-failure: a clean quit is still a desktop with no terrarium on
+# it. Ctrl+Alt+Q therefore restarts the scene; to stop it for real, use
+# systemctl --user stop digital-terrarium.service
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

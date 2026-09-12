@@ -1,0 +1,15 @@
+[Unit]
+Description=Terrarium telemetry and Spotify mood player
+PartOf=graphical-session.target
+# An always-on scene must never be permanently defeated by a burst of restarts.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/quartermeat/work/digital-terrarium
+# Safe to restart: the bridge records startup playback in XDG_RUNTIME_DIR, so it
+# plays once per login session rather than once per process start.
+Environment=TERRARIUM_SPOTIFY_START_ON_LAUNCH=true
+ExecStart=/home/quartermeat/work/digital-terrarium/bin/digital-terrarium
+Restart=always
+RestartSec=2

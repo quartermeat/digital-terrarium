@@ -243,8 +243,27 @@ granting the entire agent permanent root authority; commands needing elevation
 still use the normal sudo policy.
 
 `digital-terrarium.service` starts the desktop window at login and uses
-`terrarium-mood.service` for the bridge. Ollama may remain available independently
-for on-demand local inference. The graphical terrarium follows the desktop session.
+`terrarium-mood.service` for the bridge. Both units live in `systemd/` and are
+symlinked into `~/.config/systemd/user/`, so the always-on setup is version
+controlled rather than existing only on one machine:
+
+```bash
+ln -sf "$PWD/systemd/digital-terrarium.service" ~/.config/systemd/user/
+ln -sf "$PWD/systemd/terrarium-mood.service" ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now digital-terrarium.service
+```
+
+Both restart always, not just on failure — a clean quit still leaves a desktop
+with no terrarium on it — and both set `StartLimitIntervalSec=0` so a burst of
+restarts can never defeat them permanently. Consequently `Ctrl+Alt+Q` restarts
+the scene rather than ending it; to stop it for real, use
+`systemctl --user stop digital-terrarium.service`. Restarting the bridge does
+not replay startup playback, because the bridge records that in
+`XDG_RUNTIME_DIR`, which the session clears on logout.
+
+Ollama may remain available independently for on-demand local inference. The
+graphical terrarium follows the desktop session.
 
 ## Verification
 
