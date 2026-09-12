@@ -77,6 +77,12 @@ def handle(event):
     if name == "SessionEnd":
         agent_path.unlink(missing_ok=True)
         return
+    if name in ("SubagentStart", "SubagentStop") and not event.get("agent_type"):
+        # Claude Code runs internal subagents with no agent_type (background
+        # summarization and the like); that isn't user-facing work, so leave
+        # whatever phase is already on disk alone rather than clobbering a
+        # persistent "waiting" report with transient noise.
+        return
     phase, detail, target = "working", "active session", {}
     if name == "SessionStart":
         phase, detail = "idle", "session ready"

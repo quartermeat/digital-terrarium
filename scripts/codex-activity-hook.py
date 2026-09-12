@@ -77,6 +77,11 @@ def handle(event):
     if name == "SessionEnd":
         agent_path.unlink(missing_ok=True)
         return
+    if name in ("SubagentStart", "SubagentStop") and not event.get("agent_type"):
+        # Internal subagents with no agent_type aren't user-facing work; leave
+        # whatever phase is already on disk alone rather than clobbering a
+        # persistent "waiting" report with transient noise.
+        return
     phase, detail, target = "working", "active session", {}
     if name == "SessionStart":
         phase, detail = "idle", "session ready"
