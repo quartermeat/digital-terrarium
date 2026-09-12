@@ -1,6 +1,8 @@
 const { app, BrowserWindow, session, screen, globalShortcut } = require('electron');
-const { spawn } = require('node:child_process');
-const http = require('node:http');
+const { spawn, execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const run = promisify(execFile);
+const { readHealth, ensureBridge: ensureVersionedBridge } = require('./bridge-lifecycle.cjs');
 
 const interfaceUrl = 'http://' + (process.env.TERRARIUM_ADDRESS || '127.0.0.1:8091') + '/';
 let bridgeProcess, visionWindow;
@@ -15,29 +17,22 @@ app.on('gpu-info-update', () => {
   }));
 });
 
-function bridgeIsRunning() {
-  return new Promise(resolve => {
-    const request = http.get(interfaceUrl + 'api/health', response => {
-      let body = '';
-      response.on('data', chunk => { body += chunk; });
-      response.on('end', () => {
-        try { const health = JSON.parse(body); resolve(health.app === 'digital-terrarium' && health.telemetryVersion === 1); }
-        catch { resolve(false); }
-      });
-    });
-    request.setTimeout(300, () => request.destroy());
-    request.on('error', () => resolve(false));
-  });
-}
-
 async function ensureBridge() {
-  if (await bridgeIsRunning()) return;
-  bridgeProcess = spawn('./bin/digital-terrarium', [], { cwd: __dirname, stdio: 'inherit' });
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    if (await bridgeIsRunning()) return;
-  }
-  throw new Error('Local interface bridge did not start');
+  await ensureVersionedBridge({
+    version: app.getVersion(),
+    health: () => readHealth(interfaceUrl),
+    replace: async () => {
+      if (interfaceUrl !== 'http://127.0.0.1:8091/') throw new Error('Refusing to replace a bridge at a custom address');
+      await run('systemctl', ['--user', 'is-active', '--quiet', 'terrarium-mood.service']);
+      // Restart=always restores the backend; systemd may also recycle this
+      // dependent display. The next startup rechecks the build version.
+      await run('systemctl', ['--user', 'kill', '--kill-whom=main', '--signal=TERM', 'terrarium-mood.service']);
+    },
+    start: async () => {
+      bridgeProcess = spawn('./bin/digital-terrarium', [], { cwd: __dirname, stdio: 'inherit' });
+      bridgeProcess.on('error', error => console.error('[terrarium bridge]', error));
+    },
+  });
 }
 
 // The camera lives in its own hidden renderer: inference never competes with
@@ -91,7 +86,7 @@ app.whenReady().then(async () => {
   // Vision is additive: a camera that will not open, or a renderer that fails
   // to load, must leave the ecology running rather than fail app startup.
   createVisionSource().catch(error => console.error('[terrarium vision]', error));
-});
+}).catch(error => { console.error('[terrarium startup]', error); app.exit(1); });
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { visionWindow?.destroy(); bridgeProcess?.kill(); });

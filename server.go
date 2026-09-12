@@ -102,7 +102,7 @@ func main() {
 	vision := &visionHub{}
 	mux.HandleFunc("/api/audio", audio.serve)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"app": "digital-terrarium", "telemetryVersion": 1})
+		writeJSON(w, 200, map[string]any{"app": "digital-terrarium", "telemetryVersion": 1, "version": bridgeVersion()})
 	})
 	mux.HandleFunc("/api/ecosystem", collector.serve)
 	mux.HandleFunc("/api/agents", agentActivityHandler)

@@ -15,7 +15,18 @@ then replays at the primary display's own aspect. See README.md for detail.
 
 ### A stale bridge is silently reused, so a deploy can serve old code
 
-**Status:** open as of v1.9.0. Worked around by hand twice; not fixed.
+**Status:** fixed for the managed desktop backend in v1.9.2. Health
+reports the package version embedded at Go build time; Electron requires an
+exact match and recycles `terrarium-mood.service` on mismatch, waiting for the
+matching version before loading renderers. Custom-address or unmanaged stale
+backends fail visibly and require their owner to stop/rebuild them.
+
+The backend is deliberately in the separate `terrarium-mood.service` cgroup.
+Restarting only the display does not restart that dependency; this is not
+evidence of a child escaping its cgroup. Recovery signals the backend unit's
+main process, allowing `Restart=always` to restore it. Systemd also recycles the
+dependent display, whose next startup rechecks the version. The historical
+investigation below is retained for context.
 
 **Symptom.** After restarting `digital-terrarium.service`, the scene runs
 normally but serves the *previous* build. Nothing errors and nothing logs, so the

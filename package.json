@@ -1,13 +1,13 @@
 {
   "name": "digital-terrarium",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "A GPU-assisted electronic aquarium beneath your desktop windows.",
   "main": "electron-main.js",
   "scripts": {
     "build:bridge": "go build -trimpath -o bin/digital-terrarium .",
     "start": "npm run build:bridge && electron . --terrarium",
     "serve": "npm run build:bridge && ./bin/digital-terrarium",
-    "test": "go test ./... && node --test ecology.test.mjs agent-activity.test.mjs agent-courier.test.mjs vision.test.mjs",
+    "test": "go test ./... && node --test ecology.test.mjs agent-activity.test.mjs agent-courier.test.mjs vision.test.mjs bridge-lifecycle.test.cjs",
     "agent:demo": "node scripts/agent-activity.mjs demo",
     "test:scene": "npm run build:bridge && electron scripts/scene-check.cjs",
     "test:vision": "npm run build:bridge && electron scripts/vision-check.cjs",
