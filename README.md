@@ -96,10 +96,22 @@ The optional Spotify controller chooses what to queue next from machine activity
 | `busy` | CPU at least 45%, or network traffic at least 5 MiB/s | Energetic music |
 | `chaotic` | CPU at least 80%, or memory stalls at least 5% | Intense music |
 
-Copy `spotify.example.json` to
-`~/.config/digital-terrarium/spotify.json`, add the client ID from a Spotify
-developer app, and replace each placeholder with a playlist you own or
-collaborate on. In the Spotify app settings, register this exact redirect URI:
+Copy `spotify.example.json` to `spotify.json` in the repository root, add the
+client ID from a Spotify developer app, and replace each placeholder with a
+playlist you own or collaborate on — Spotify's API rejects reads of playlists
+you neither own nor collaborate on, including its own editorial/algorithmic
+ones. `spotify.json` is git-tracked: it holds only a PKCE client ID and
+playlist IDs, no secrets, so mood-playlist changes get real history and can be
+tagged with a release. Symlink it into place:
+
+```bash
+ln -s "$(pwd)/spotify.json" ~/.config/digital-terrarium/spotify.json
+```
+
+The refresh/access token is a secret and is never part of this — it stays out
+of the repo entirely (`.gitignore`d) and lives only in
+`~/.config/digital-terrarium/spotify-token.json`, described below. In the
+Spotify app settings, register this exact redirect URI:
 
 ```text
 http://127.0.0.1:8091/api/spotify/callback

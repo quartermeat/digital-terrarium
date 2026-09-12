@@ -1,0 +1,11 @@
+{
+  "clientId": "d1d8adfc67d64558b560d8adf3fc456a",
+  "enabled": true,
+  "deviceName": "debianBox",
+  "playlists": {
+    "calm": ["spotify:playlist:37i9dQZF1FwWPoweVol0yw"],
+    "flow": ["spotify:playlist:37i9dQZF1FwOpbj3ilk7ES"],
+    "busy": ["spotify:playlist:37i9dQZF1FwNgwKjZfqyII"],
+    "chaotic": ["spotify:playlist:37i9dQZF1FwRQO7tcGVZ6C"]
+  }
+}
