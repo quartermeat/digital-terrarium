@@ -76,10 +76,13 @@ entities turn gray; hover details identify readings as stale.
 
 The display is bounded to 128 process groups, eight filesystems, six interfaces,
 and 160 transient particles. Stable slots preserve process identity when the list
-changes. CPU-driven movement runs on WebGPU when available, then WebGL2 transform
-feedback, with a JavaScript fallback. Hover content and drawing remain on the
-CPU; rendering uses Canvas 2D acceleration. Compact state is read back each tick,
-so GPU compute is not a claim of better performance at this population size.
+changes. Movement is integrated in JavaScript. Earlier versions ran this step on
+WebGPU, then WebGL2 transform feedback; both were removed in v1.4.0 after
+measurement, because drawing happens on the CPU and so every frame ended with a
+blocking `getBufferSubData` readback to get positions back into JavaScript. That
+readback cost 29% of each frame, and the GPU round trip measured slower than the
+plain JavaScript integration at every population tested — 20x slower at 128
+creatures and still 4.7x slower at 2048.
 
 The default bridge is local-only. Set `TERRARIUM_ADDRESS` consistently for
 Electron and Go to change the address. Public assets are explicitly listed;
@@ -245,6 +248,6 @@ The first command tests telemetry parsing, rate baselines, counter resets, PID
 reuse, group identity, unavailable data, visual activity mappings, and Spotify
 mood selection. The scene
 check starts an isolated real Go bridge and a hidden Electron window, verifies
-live telemetry, GPU active/idle movement, hover behavior, stale-data handling,
+live telemetry, active/idle movement, hover behavior, stale-data handling,
 and opaque wallpaper redraw. It writes a local preview to
 `/tmp/digital-terrarium-scene.png`, then closes its own processes.

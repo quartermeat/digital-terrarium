@@ -1,5 +1,4 @@
-import { createCreatureCompute } from './creature-compute.mjs';
-import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, fallbackStep, measured, clamp } from './ecology.mjs';
+import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, stepCreatures, measured, clamp } from './ecology.mjs';
 import { agentFresh, agentWaypoints } from './agent-activity.mjs';
 
 const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
@@ -10,7 +9,6 @@ let agents = [], agentError = false;
 let audio = null, audioReceived = 0, musicLevel = 0, musicBass = 0, musicPhase = 0;
 const musicWave = Array(40).fill(0);
 let width = innerWidth, height = innerHeight, time = 0, last = 0;
-let compute = null, backend = 'CPU', computeFailed = false;
 const particles = [], accumulators = new Map(), rootPhases = new Map();
 const operatorStates = new Map();
 const wallpaper = new Image();
@@ -52,10 +50,6 @@ async function pollAudio() {
  setTimeout(pollAudio, 50);
 }
 pollAudio();
-createCreatureCompute(CAPACITY).then(value => {
- compute = value; backend = value.label; console.info('Simulation:', backend);
-}).catch(error => { console.warn('CPU simulation:', error.message); });
-addEventListener('pagehide', () => compute?.destroy());
 function resize() {
  width = innerWidth; height = innerHeight;
  const ratio = Math.min(devicePixelRatio, 2);
@@ -234,15 +228,12 @@ function drawAgent(agent,index,hits,dt) {
  hits.push({x,y,rx:48,ry:40,text:agent.name+' / fast agent courier\n'+phase+(agent.detail?'\n'+agent.detail:'')+'\nVisiting: '+destination.label});
  if(index===0){canvas.dataset.agentPhase=agent.phase;canvas.dataset.agentX=String(x);canvas.dataset.agentY=String(y);canvas.dataset.agentTarget=destination.label;}
 }
-async function frame(stamp) {
+function frame(stamp) {
  const dt=Math.min((stamp-last)/1000||0,.05);last=stamp;time+=dt;
  if(pending){snapshot=pending;pending=null;syncGroups(creatures,snapshot.processes);const allowed=new Set([...snapshot.processes.map(g=>'cpu:'+g.name),...snapshot.network.flatMap(n=>[n.name+'rx',n.name+'tx'])]);for(const key of accumulators.keys())if(!allowed.has(key))accumulators.delete(key);}
  const fresh=!!snapshot&&!networkError&&Date.now()-Date.parse(snapshot.sampledAt)<5000;
  creatures.forEach(c=>prepareCreature(c,dt,fresh));
- if(compute) {
-  try {await compute.step(creatures,[],dt,time,true);}
-  catch(error){console.warn('GPU compute failed; continuing on CPU',error);compute.destroy();compute=null;computeFailed=true;backend='CPU';fallbackStep(creatures,dt,time);}
- } else fallbackStep(creatures,dt,time);
+ stepCreatures(creatures,dt,time);
  // Redraw the wallpaper every frame; alpha clearing alone caused desktop trails.
  ctx.clearRect(0,0,width,height);
  ctx.fillStyle='#071719';ctx.fillRect(0,0,width,height);
@@ -266,8 +257,8 @@ async function frame(stamp) {
  }
  ctx.globalAlpha=1;hover(hits,fresh);
  // Machine-readable diagnostics for local verification; no permanent HUD.
- canvas.dataset.ready='true';canvas.dataset.backend=backend;canvas.dataset.fresh=String(fresh);
- canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);canvas.dataset.gpuFailed=String(computeFailed);
+ canvas.dataset.ready='true';canvas.dataset.fresh=String(fresh);
+ canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);
  canvas.dataset.agentCount=String(agentError?0:agents.filter(agent=>agentFresh(agent)).length);
  requestAnimationFrame(frame);
 }

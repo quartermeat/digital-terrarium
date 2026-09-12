@@ -43,7 +43,7 @@ func main() {
 	mux.HandleFunc("/api/spotify/callback", spotify.callback)
 	mux.HandleFunc("/api/wallpaper", wallpaperHandler)
 	// Serve only public assets, never repository files or configuration.
-	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs", "creature-compute.mjs", "creature-compute-gl.mjs", "creature-compute.vert", "creature-compute.wgsl"} {
+	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs"} {
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, name) })
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

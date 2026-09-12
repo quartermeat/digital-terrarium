@@ -29,7 +29,7 @@ export function prepareCreature(c, dt, fresh) {
 }
 // Logarithmic visual rates keep saturated links readable. Zero stays zero.
 export function emissionRate(bytes) { return measured(bytes) && bytes > 0 ? Math.min(16, Math.log2(1 + bytes / 1024)) : 0; }
-export function fallbackStep(creatures, dt, time) {
+export function stepCreatures(creatures, dt, time) {
  for (const c of creatures) {
   const dx = .5 + Math.sin(time * .09 + c.phase) * .43 - c.x;
   const dy = .48 + Math.cos(time * .12 + c.phase) * .35 - c.y;

@@ -25,9 +25,9 @@ app.whenReady().then(async () => {
  const errors=[];
  window.webContents.on('console-message',event=>{if(event.level==='error')errors.push(event.message);});
  await window.loadURL(url+'/terrarium.html');
- for(let i=0;i<60;i++) {if(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh==='true' && document.querySelector('canvas').dataset.backend.includes('GPU')"))break;await pause(100);}
+ for(let i=0;i<60;i++) {if(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh==='true'"))break;await pause(100);}
  const scene=await window.webContents.executeJavaScript(`({ ...document.querySelector('canvas').dataset, controls:document.querySelectorAll('button,header,nav').length, alpha:document.querySelector('canvas').getContext('2d').getImageData(0,0,1,1).data[3] })`);
- assert.equal(scene.fresh,'true');assert.ok(Number(scene.creatures)>0);assert.equal(scene.controls,0);assert.equal(scene.alpha,255);assert.equal(scene.gpuFailed,'false');
+ assert.equal(scene.fresh,'true');assert.ok(Number(scene.creatures)>0);assert.equal(scene.controls,0);assert.equal(scene.alpha,255);
  // Hover the memory pool, then leave the scene. No persistent text is allowed.
  await window.webContents.executeJavaScript("document.querySelector('canvas').dispatchEvent(new PointerEvent('pointermove',{clientX:innerWidth*.84,clientY:innerHeight*.84}))");
  await pause(200);
@@ -35,16 +35,14 @@ app.whenReady().then(async () => {
  assert.ok(popup.includes('MEMORY / electrolyte'));
  await window.webContents.executeJavaScript("document.querySelector('canvas').dispatchEvent(new PointerEvent('pointerleave'))");
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('#tooltip').style.display"),'none');
- const gpu=await window.webContents.executeJavaScript(`(async()=>{
-  const { createCreatureCompute } = await import('./creature-compute.mjs');
-  const { emptyCreature, prepareCreature } = await import('./ecology.mjs');
-  const engine=await createCreatureCompute(2);
+ const motion=await window.webContents.executeJavaScript(`(async()=>{
+  const { emptyCreature, prepareCreature, stepCreatures } = await import('./ecology.mjs');
   const creatures=[0,.2].map(cpu=>({...emptyCreature(),group:{cpu,rssBytes:1e7}}));
   creatures.forEach(c=>prepareCreature(c,.05,true));
-  await engine.step(creatures,[],.05,1,true);
-  const result={backend:engine.label,idle:creatures[0].x===.5&&creatures[0].y===.5,active:creatures[1].x!==.5||creatures[1].y!==.5};engine.destroy();return result;
+  stepCreatures(creatures,.05,1);
+  return {idle:creatures[0].x===.5&&creatures[0].y===.5,active:creatures[1].x!==.5||creatures[1].y!==.5};
  })()`);
- assert.ok(gpu.idle&&gpu.active);
+ assert.ok(motion.idle&&motion.active);
  // Speaker input moves the well, then fades on silence or capture failure.
  await window.webContents.executeJavaScript(`
   window.audioFetch=window.fetch; window.audioMode='playing';
@@ -98,6 +96,6 @@ app.whenReady().then(async () => {
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh"),'false');
  const unexpected=errors.filter(message=>!message.includes('ERR_CONNECTION_REFUSED')&&!message.includes('Failed to fetch'));
  assert.deepEqual(unexpected,[]);
- console.log(JSON.stringify({scene,gpu,hover:true,stale:true,agent:true,processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
+ console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
  clearTimeout(timeout);finish(0);
 }).catch(error=>{console.error(error);clearTimeout(timeout);finish(1);});

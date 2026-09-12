@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyCreature, syncGroups, prepareCreature, emissionRate, fallbackStep } from './ecology.mjs';
+import { emptyCreature, syncGroups, prepareCreature, emissionRate, stepCreatures } from './ecology.mjs';
 test('process identity survives reorder; exited groups disappear; cap is respected',()=>{
  const slots=Array.from({length:2},emptyCreature);
  syncGroups(slots,[{name:'a'},{name:'b'}]);slots[0].x=.123;
@@ -13,7 +13,7 @@ test('activity follows measured CPU; idle and stale organisms stop',()=>{
  prepareCreature(c,.016,true);assert.ok(c.speed>0);const small=c.size;
  c.group.rssBytes=1073741824;prepareCreature(c,.016,true);assert.ok(c.size>small);
  prepareCreature(c,.016,false);assert.equal(c.speed,0);
- c.group.cpu=0;prepareCreature(c,.016,true);const x=c.x;fallbackStep([c],1,1);assert.equal(c.x,x);
+ c.group.cpu=0;prepareCreature(c,.016,true);const x=c.x;stepCreatures([c],1,1);assert.equal(c.x,x);
  c.group.cpu=null;prepareCreature(c,.016,true);assert.equal(c.speed,0);
 });
 test('no bubbles are fabricated for unavailable or idle network traffic',()=>{
