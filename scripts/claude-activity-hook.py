@@ -26,6 +26,15 @@ SAFE = re.compile(r"[^a-zA-Z0-9_. /:@+-]")
 HOST_COMM = "claude"
 IDLE_AFTER = 2.5
 WATCH_INTERVAL = 1
+# Hooks fire when a tool starts and when it finishes, never while it runs, so a
+# build or a test suite produces no events at all for minutes. Refreshing the
+# reported phase in place keeps that work visible instead of letting it decay to
+# "waiting" while it is still going. The cap is the safety net: a phase whose
+# closing event never arrives resolves on its own rather than sticking forever.
+MAX_HOLD = 600
+IN_PROGRESS = ("thinking", "working", "tool")
+AT_REST = ("idle", "waiting", "error")
+WAITING = ("waiting", "ready for direction", {})
 
 
 def clean(value, limit=96):
@@ -50,17 +59,19 @@ def watch_pid_path(agent_path):
 
 
 def publish(agent_path, agent_id, phase, detail, target):
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     activity = {
         "version": 1,
         "id": agent_id,
         "name": "Claude",
-        "sampledAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "sampledAt": stamp,
         "phase": phase,
         "detail": detail,
     }
     if target.get("name"):
         activity["target"] = target
     atomic(agent_path, activity)
+    return stamp
 
 
 def tool_target(event):
@@ -115,6 +126,36 @@ def stop_watch(agent_path):
     path.unlink(missing_ok=True)
 
 
+def watch_decision(current, now, mine, hold_until):
+    """Decide what the watcher should write, given what is on disk.
+
+    Returns (report, hold_until), where report is None to leave the file alone.
+    Never invents activity: an in-progress phase is only ever repeated, and only
+    while the report it came from is still within its hold.
+    """
+    try:
+        stamp = current["sampledAt"]
+        sampled = calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
+        phase = current["phase"]
+    except (TypeError, ValueError, KeyError):
+        return WAITING, hold_until
+    # At-rest phases describe a condition, not an event, and stay true until a
+    # fresh report supersedes them.
+    if phase in AT_REST:
+        return None, hold_until
+    if phase not in IN_PROGRESS:
+        return WAITING, hold_until
+    # A stamp this watcher did not write is a real hook report, so the work it
+    # describes has just begun and earns a full hold.
+    if stamp != mine:
+        hold_until = now + MAX_HOLD
+    if now - sampled <= IDLE_AFTER:
+        return None, hold_until
+    if now < hold_until:
+        return (phase, current.get("detail", ""), current.get("target") or {}), hold_until
+    return WAITING, hold_until
+
+
 def watch_forever(agent_path, host, agent_id):
     def stop(*_):
         agent_path.unlink(missing_ok=True)
@@ -123,6 +164,7 @@ def watch_forever(agent_path, host, agent_id):
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    mine, hold_until = None, 0.0
     try:
         while True:
             try:
@@ -131,16 +173,16 @@ def watch_forever(agent_path, host, agent_id):
                 break
             try:
                 current = json.loads(agent_path.read_text())
-                sampled = calendar.timegm(time.strptime(current["sampledAt"], "%Y-%m-%dT%H:%M:%SZ"))
-                stale = current.get("phase") not in ("idle", "waiting", "error") and time.time() - sampled > IDLE_AFTER
-            except (OSError, ValueError, KeyError):
-                stale = True
+            except (OSError, ValueError):
+                current = None
             # Takes over a short while after the last real report, staying
             # inside the bridge's five-second freshness window so presence
-            # never blinks out between a report expiring and idle replacing
-            # it. Never overwrites a fresh report, never invents activity.
-            if stale:
-                publish(agent_path, agent_id, "waiting", "ready for direction", {})
+            # never blinks out between a report expiring and idle replacing it.
+            report, hold_until = watch_decision(current, time.time(), mine, hold_until)
+            if report is None:
+                mine = None
+            else:
+                mine = publish(agent_path, agent_id, *report)
             time.sleep(WATCH_INTERVAL)
     finally:
         agent_path.unlink(missing_ok=True)
