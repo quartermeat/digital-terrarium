@@ -26,7 +26,7 @@ cover crop; slideshows and per-monitor wallpaper selection are not implemented.
 
 | Visible entity | Machine measurement | Behavior |
 | --- | --- | --- |
-| Electronic process creature | Current user's processes grouped by Linux command name | Speed and brightness follow CPU activity. Size follows summed RSS. Idle groups stop moving. Groups appear/disappear with the sampled process list. |
+| Electronic process creature | Current user's processes grouped by Linux command name | Speed and brightness follow CPU activity. Size follows summed RSS. Status bars count doublings of thread count. The ring closes in proportion to the share of those threads that are runnable. Outlines stacked behind the body count the processes sharing the name. Idle groups stop moving. Groups appear/disappear with the sampled process list. |
 | Activity sparks | CPU activity of their process group | Brief upward sparks become more frequent as activity rises. |
 | Electrolyte pool | RAM usage, memory pressure, swap, speaker audio | Fill and rim color follow RAM usage. Lines ripple with the playing waveform and bass, alongside memory stalls and swap traffic. |
 | Circuit root | Mounted local filesystem | Color and height reflect unavailable space. Pulses follow measured block-device reads/writes. |
@@ -74,7 +74,7 @@ baseline. Counter resets and PID reuse do not produce activity spikes. When the
 feed fails or becomes more than five seconds old, motion/emissions stop and
 entities turn gray; hover details identify readings as stale.
 
-The display is bounded to 128 process groups, eight filesystems, six interfaces,
+The display is bounded to 512 process groups, eight filesystems, six interfaces,
 and 160 transient particles. Stable slots preserve process identity when the list
 changes. Movement is integrated in JavaScript. Earlier versions ran this step on
 WebGPU, then WebGL2 transform feedback; both were removed in v1.4.0 after

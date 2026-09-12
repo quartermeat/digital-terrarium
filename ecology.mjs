@@ -1,4 +1,4 @@
-export const CAPACITY = 128;
+export const CAPACITY = 512;
 export const measured = value => typeof value === 'number' && Number.isFinite(value);
 export const clamp = (value, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 export function hash(text) { let n = 2166136261; for (const c of text) n = Math.imul(n ^ c.charCodeAt(0), 16777619); return n >>> 0; }
@@ -18,6 +18,15 @@ export function syncGroups(slots, groups) {
  }
 }
 export function activity(cpu) { return measured(cpu) ? clamp(Math.sqrt(Math.max(0, cpu) * 12)) : 0; }
+// Structure the body carries regardless of activity: how many threads the group
+// owns, how many of them are runnable, and how many processes are stacked in it.
+// These are measured facts, so they stay shaped even when the feed goes stale —
+// staleness is already signalled by colour.
+export function bodyBars(threads) { return measured(threads) ? Math.max(1, Math.min(6, Math.round(Math.log2(1 + threads)))) : 1; }
+export function bodyStack(count) { return measured(count) ? Math.max(0, Math.min(3, count - 1)) : 0; }
+export function runnableShare(running, threads) {
+ return measured(running) && measured(threads) && threads > 0 ? clamp(running / threads) : 0;
+}
 export function prepareCreature(c, dt, fresh) {
  if (!c.group) { c.speed = 0; return; }
  const level = fresh ? activity(c.group.cpu) : 0;
@@ -26,6 +35,9 @@ export function prepareCreature(c, dt, fresh) {
  c.alpha = Math.min(1, c.alpha + dt * 1.5);
  c.size = 8 + clamp(Math.log2(1 + c.group.rssBytes / 1048576) / 12) * 10;
  c.level = level;
+ c.bars = bodyBars(c.group.threads);
+ c.stack = bodyStack(c.group.count);
+ c.runnable = fresh ? runnableShare(c.group.running, c.group.threads) : 0;
 }
 // Logarithmic visual rates keep saturated links readable. Zero stays zero.
 export function emissionRate(bytes) { return measured(bytes) && bytes > 0 ? Math.min(16, Math.log2(1 + bytes / 1024)) : 0; }

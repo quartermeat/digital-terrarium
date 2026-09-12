@@ -157,11 +157,27 @@ function drawCreature(c,fresh,hits,dt) {
  ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(Math.sin(c.heading)*height,Math.cos(c.heading)*width));ctx.globalAlpha=c.alpha;
  const color=valid?'hsl('+c.hue+' 55% '+(40+c.level*40)+'%)':'#687b7a';
  // Compact floating chip: a single body and status bars, with no animal-like legs.
- ctx.fillStyle='#102b30';ctx.strokeStyle=color;ctx.lineWidth=1.2;
+ // Stacked outlines behind it count the processes sharing the group name.
+ ctx.strokeStyle=color;ctx.lineWidth=1.2;
+ for(let i=c.stack;i>0;i--){
+  ctx.globalAlpha=c.alpha*.16;const o=i*s*.13;
+  ctx.beginPath();ctx.roundRect(-s*.8+o,-s*.42-o,s*1.6,s*.84,s*.18);ctx.stroke();
+ }
+ ctx.globalAlpha=c.alpha;
+ ctx.fillStyle='#102b30';
  ctx.beginPath();ctx.roundRect(-s*.8,-s*.42,s*1.6,s*.84,s*.18);ctx.fill();ctx.stroke();
- ctx.globalAlpha=.45;ctx.strokeStyle=color;ctx.beginPath();ctx.arc(0,0,s*.62,0,Math.PI*2);ctx.stroke();
- ctx.globalAlpha=1;ctx.fillStyle=color;ctx.fillRect(-s*.45,-s*.12,s*.22,s*.24);
- ctx.fillRect(-s*.1,-s*.12,s*.22,s*.24);ctx.fillRect(s*.25,-s*.12,s*.22,s*.24);
+ // The ring closes in proportion to the share of this group's threads that are
+ // runnable, so a saturated group reads as a full circle rather than an arc.
+ ctx.globalAlpha=.45;ctx.beginPath();ctx.arc(0,0,s*.62,0,Math.PI*2);ctx.stroke();
+ if(c.runnable>0){
+  ctx.globalAlpha=.95;ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(0,0,s*.62,-Math.PI/2,-Math.PI/2+c.runnable*Math.PI*2);ctx.stroke();
+  ctx.lineWidth=1.2;
+ }
+ // One bar per doubling of thread count, so a thread-heavy group is visibly denser.
+ ctx.globalAlpha=1;ctx.fillStyle=color;
+ const pitch=s*1.2/c.bars;
+ for(let i=0;i<c.bars;i++)ctx.fillRect(-s*.5+i*pitch,-s*.12,Math.max(1.2,pitch*.55),s*.24);
  ctx.restore();
  if(valid)emit('cpu:'+c.group.name,c.level*2,dt,()=>({x,y,vx:0,vy:-12,life:.7,color:'#9ef5b9',kind:'spark'}));
  hits.push({x,y,rx:s+8,ry:s+8,text:c.group.name+' / '+c.group.count+' processes\nCPU '+percent(c.group.cpu)+' of whole machine\nRSS sum '+bytes(c.group.rssBytes)+' (shared pages may repeat)\nThreads '+c.group.threads+' · runnable '+c.group.running+'\n'+(!valid?'Waiting for measurements':c.level>0?'Active':'Resting')});
