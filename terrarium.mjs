@@ -305,8 +305,11 @@ function drawGrey(face,hits,dt) {
  const eyes=[centroid(ring(FACE_RINGS.leftEye[0])),centroid(ring(FACE_RINGS.rightEye[0]))];
  for(const eye of eyes) {
   const outward=eye.x<middle?-1:1;
+  // The reference's eyes sit wider than human eye landmarks, at roughly 43%
+  // of the head width centre-to-centre. Move the tracked point into that alien
+  // spacing, then build the eye around it.
   const seat={x:eye.x+outward*span*.055,y:eye.y+span*.025};
-  const shape=alienEye(seat,span*.5,span*.24,.42,outward);
+  const shape=alienEye(seat,span*.4,span*.25,.34,outward);
   ringPath(shape);
   // Kill the glow while filling: a lit shadow bleeds through the fill and turns
   // a black eye grey, which is the one colour it must not be.
@@ -314,11 +317,10 @@ function drawGrey(face,hits,dt) {
   ctx.fillStyle='rgba(0,0,0,'+opacity*.97+')';ctx.fill();
   ctx.shadowBlur=22*opacity;
   arcRing(shape,wire,1.9,1);
-  // One highlight high on the outer curve is what makes a black eye read as wet
-  // rather than as a hole cut in the head.
-  const gleam=shape[Math.round(shape.length*.36)];
+  // The bright circle is the tracked human eye. Keep it at the visual centre of
+  // the large black eye so the camera mapping reads directly on the grey.
   ctx.shadowBlur=18*opacity;
-  dot(gleam.x,gleam.y,Math.max(1.4,span*.013),'rgba(226,255,252,'+glow*.85+')');
+  dot(seat.x,seat.y,Math.max(1.4,span*.013),'rgba(226,255,252,'+glow*.85+')');
   ctx.shadowBlur=22*opacity;
  }
  const brow=(eyes[0].y+eyes[1].y)/2;

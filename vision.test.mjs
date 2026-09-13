@@ -71,6 +71,15 @@ test('the eye is a lopsided teardrop that slants up and out, and mirrors',()=>{
  const centre={x:0,y:0};
  const right=alienEye(centre,100,40,.42,1);
  assert.ok(right.length>=10);
+ // The requested centre is the filled polygon's visual centre, even though the
+ // teardrop carries more area toward its broad outer corner.
+ let area=0,cx=0,cy=0;
+ for(let index=0;index<right.length;index++) {
+  const a=right[index],b=right[(index+1)%right.length],cross=a.x*b.y-b.x*a.y;
+  area+=cross;cx+=(a.x+b.x)*cross;cy+=(a.y+b.y)*cross;
+ }
+ assert.ok(Math.abs(cx/(3*area)-centre.x)<1e-9&&Math.abs(cy/(3*area)-centre.y)<1e-9,
+  'the tracked eye sits at the visual centre of the alien eye');
  const outer=right.reduce((best,point)=>point.x>best.x?point:best);
  const inner=right.reduce((best,point)=>point.x<best.x?point:best);
  assert.ok(outer.y<inner.y,'the outer corner rides higher than the inner one');

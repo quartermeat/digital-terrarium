@@ -113,7 +113,7 @@ repository files and the old webcam control endpoints are not served.
 
 ## Spotify mood queue
 
-The optional Spotify controller chooses what to queue next from machine activity:
+The optional Spotify controller chooses a playlist from machine activity:
 
 | Mood | Trigger | Playlist role |
 | --- | --- | --- |
@@ -154,13 +154,17 @@ served over HTTP. Inspect the controller without exposing credentials:
 curl -fsS http://127.0.0.1:8091/api/spotify/status
 ```
 
-Every 15 seconds, the controller reads the current Spotify playback state. When
-a playing track has 30 seconds or less remaining, it queues one track from the
-current mood playlist. It queues at most once for each current track and does
-nothing while playback is stopped. Mood selection uses machine telemetry only;
-the memory well separately reacts to the desktop's speaker audio.
+Every 15 seconds, the controller measures the current mood. When the mood selects
+a different playlist, the change stays pending until the current song ends. At
+the song boundary it measures the mood again and switches only if that change is
+still relevant; returning to the old mood cancels it. An unchanged mood issues no
+playback or queue request. If two moods name the same playlist, crossing between
+them also leaves playback alone. Pausing preserves the pending change without
+cutting off the paused song. Mood selection uses machine telemetry only; the
+memory well separately reacts to the desktop's speaker audio. Status reports a
+pending transition as `pendingMood`.
 
-Set `TERRARIUM_SPOTIFY_START_ON_LAUNCH=true` to start one mood-selected track
+Set `TERRARIUM_SPOTIFY_START_ON_LAUNCH=true` to start one mood-selected playlist
 when the bridge launches. It waits for authorization and the playback device,
 then leaves subsequent pauses alone. `deviceName` in `spotify.json` must match
 the computer's name in Spotify (defaults to the machine hostname). It never

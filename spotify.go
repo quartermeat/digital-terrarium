@@ -39,10 +39,11 @@ type spotifyStatus struct {
 	Connected    bool   `json:"connected"`
 	Enabled      bool   `json:"enabled"`
 	Mood         string `json:"mood"`
-	LastQueued   string `json:"lastQueued,omitempty"`
 	LastError    string `json:"lastError,omitempty"`
 	StartPending bool   `json:"startPending"`
 	LastStarted  string `json:"lastStarted,omitempty"`
+	Playlist     string `json:"playlist,omitempty"`
+	PendingMood  string `json:"pendingMood,omitempty"`
 }
 
 type spotifyController struct {
@@ -56,11 +57,14 @@ type spotifyController struct {
 	state        string
 	verifier     string
 	mood         string
-	lastQueued   string
 	lastError    string
-	queuedForID  string
 	startPending bool
 	lastStarted  string
+	playlistMood string
+	playlist     string
+	pendingMood  string
+	pendingList  string
+	pendingTrack string
 }
 
 func loadSpotifyConfig() (spotifyConfig, string, error) {
@@ -157,7 +161,7 @@ func (s *spotifyController) configured() bool {
 func (s *spotifyController) status() spotifyStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return spotifyStatus{Configured: s.configured(), Connected: s.token.RefreshToken != "", Enabled: s.config.Enabled, Mood: s.mood, LastQueued: s.lastQueued, LastError: s.lastError, StartPending: s.startPending, LastStarted: s.lastStarted}
+	return spotifyStatus{Configured: s.configured(), Connected: s.token.RefreshToken != "", Enabled: s.config.Enabled, Mood: s.mood, LastError: s.lastError, StartPending: s.startPending, LastStarted: s.lastStarted, Playlist: s.playlist, PendingMood: s.pendingMood}
 }
 
 func (s *spotifyController) serveStatus(w http.ResponseWriter, r *http.Request) {
@@ -359,58 +363,20 @@ func (s *spotifyController) api(ctx context.Context, method, path string, body i
 	return nil
 }
 
-func (s *spotifyController) chooseTrack(ctx context.Context, mood string) (string, string, error) {
+func (s *spotifyController) choosePlaylist(mood string) (string, error) {
 	playlists := s.config.Playlists[mood]
 	if len(playlists) == 0 {
-		return "", "", fmt.Errorf("no %s playlists configured", mood)
+		return "", fmt.Errorf("no %s playlists configured", mood)
 	}
 	playlist := strings.TrimSpace(playlists[time.Now().UnixNano()%int64(len(playlists))])
 	playlist = strings.TrimPrefix(playlist, "spotify:playlist:")
-	var result struct {
-		Items []struct {
-			Item struct {
-				URI     string `json:"uri"`
-				Name    string `json:"name"`
-				Artists []struct {
-					Name string `json:"name"`
-				} `json:"artists"`
-			} `json:"item"`
-			Track struct {
-				URI     string `json:"uri"`
-				Name    string `json:"name"`
-				Artists []struct {
-					Name string `json:"name"`
-				} `json:"artists"`
-			} `json:"track"`
-		} `json:"items"`
+	if playlist == "" {
+		return "", fmt.Errorf("empty playlist configured for %s", mood)
 	}
-	path := "/playlists/" + url.PathEscape(playlist) + "/items?limit=50"
-	if err := s.api(ctx, http.MethodGet, path, nil, &result); err != nil {
-		return "", "", err
-	}
-	if len(result.Items) == 0 {
-		return "", "", errors.New("Spotify playlist has no playable items")
-	}
-	start := int(time.Now().UnixNano() % int64(len(result.Items)))
-	for offset := range result.Items {
-		entry := result.Items[(start+offset)%len(result.Items)]
-		track := entry.Item
-		if track.URI == "" {
-			track = entry.Track
-		}
-		if strings.HasPrefix(track.URI, "spotify:track:") {
-			artist := ""
-			if len(track.Artists) > 0 {
-				artist = track.Artists[0].Name + " — "
-			}
-			return track.URI, artist + track.Name, nil
-		}
-	}
-	return "", "", errors.New("Spotify playlist has no playable tracks")
+	return "spotify:playlist:" + playlist, nil
 }
 
-// startFromMood runs once per opted-in bridge launch, then normal queueing takes over.
-func (s *spotifyController) startFromMood(ctx context.Context, mood string) error {
+func (s *spotifyController) playPlaylist(ctx context.Context, mood, playlist string) error {
 	name := s.config.DeviceName
 	if name == "" {
 		name, _ = os.Hostname()
@@ -437,11 +403,7 @@ func (s *spotifyController) startFromMood(ctx context.Context, mood string) erro
 	if deviceID == "" {
 		return fmt.Errorf("waiting for Spotify device %q; open Spotify or set deviceName in spotify.json", name)
 	}
-	uri, track, err := s.chooseTrack(ctx, mood)
-	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(map[string]any{"uris": []string{uri}, "position_ms": 0})
+	body, err := json.Marshal(map[string]any{"context_uri": playlist, "position_ms": 0})
 	if err != nil {
 		return err
 	}
@@ -449,10 +411,27 @@ func (s *spotifyController) startFromMood(ctx context.Context, mood string) erro
 		return err
 	}
 	s.mu.Lock()
-	s.startPending, s.lastStarted, s.lastError = false, track, ""
+	s.playlistMood, s.playlist, s.lastStarted, s.lastError = mood, playlist, playlist, ""
+	s.pendingMood, s.pendingList, s.pendingTrack = "", "", ""
+	s.mu.Unlock()
+	log.Printf("Spotify started %q for %s mood", playlist, mood)
+	return nil
+}
+
+// startFromMood runs once per opted-in login session. Later changes use the
+// same playlist operation, but do not alter the session-start marker.
+func (s *spotifyController) startFromMood(ctx context.Context, mood string) error {
+	playlist, err := s.choosePlaylist(mood)
+	if err != nil {
+		return err
+	}
+	if err := s.playPlaylist(ctx, mood, playlist); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.startPending = false
 	s.mu.Unlock()
 	markStartupPlaybackDone()
-	log.Printf("Spotify started %q for %s mood", track, mood)
 	return nil
 }
 
@@ -468,36 +447,69 @@ func (s *spotifyController) tick(ctx context.Context) error {
 	if status.StartPending {
 		return s.startFromMood(ctx, mood)
 	}
+	// Once a mood has selected a playlist, leave Spotify alone. If the mood
+	// changes, remember the current song and wait for Spotify to advance before
+	// changing playlists. A shift that reverses before then is cancelled.
+	s.mu.RLock()
+	playlistMood, activePlaylist := s.playlistMood, s.playlist
+	pendingMood, pendingPlaylist, pendingTrack := s.pendingMood, s.pendingList, s.pendingTrack
+	s.mu.RUnlock()
+	if playlistMood != "" && mood == playlistMood {
+		if pendingMood != "" {
+			s.mu.Lock()
+			s.pendingMood, s.pendingList, s.pendingTrack = "", "", ""
+			s.mu.Unlock()
+		}
+		return nil
+	}
 	var playback struct {
-		IsPlaying  bool  `json:"is_playing"`
-		ProgressMS int64 `json:"progress_ms"`
-		Item       struct {
-			ID         string `json:"id"`
-			DurationMS int64  `json:"duration_ms"`
+		IsPlaying bool `json:"is_playing"`
+		Context   struct {
+			URI string `json:"uri"`
+		} `json:"context"`
+		Item struct {
+			ID string `json:"id"`
 		} `json:"item"`
 	}
 	if err := s.api(ctx, http.MethodGet, "/me/player", nil, &playback); err != nil {
 		return err
 	}
-	if playback.Item.ID != s.queuedForID && (!playback.IsPlaying || playback.Item.DurationMS-playback.ProgressMS > 30_000) {
-		s.queuedForID = ""
+	if playlistMood == "" {
+		s.mu.Lock()
+		s.playlistMood, s.playlist = mood, playback.Context.URI
+		s.mu.Unlock()
 		return nil
 	}
-	if playback.Item.ID == "" || playback.Item.ID == s.queuedForID || playback.Item.DurationMS-playback.ProgressMS > 30_000 {
+	if pendingMood != mood {
+		playlist, err := s.choosePlaylist(mood)
+		if err != nil {
+			return err
+		}
+		if playlist == activePlaylist {
+			s.mu.Lock()
+			s.playlistMood = mood
+			s.pendingMood, s.pendingList, s.pendingTrack = "", "", ""
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Lock()
+		s.pendingMood, s.pendingList, s.pendingTrack = mood, playlist, playback.Item.ID
+		s.mu.Unlock()
+		log.Printf("Spotify will switch to %q for %s mood after the current song", playlist, mood)
 		return nil
 	}
-	uri, name, err := s.chooseTrack(ctx, mood)
-	if err != nil {
-		return err
+	if pendingTrack == "" {
+		if playback.Item.ID != "" {
+			s.mu.Lock()
+			s.pendingTrack = playback.Item.ID
+			s.mu.Unlock()
+		}
+		return nil
 	}
-	if err := s.api(ctx, http.MethodPost, "/me/player/queue?uri="+url.QueryEscape(uri), nil, nil); err != nil {
-		return err
+	if !playback.IsPlaying || playback.Item.ID == "" || playback.Item.ID == pendingTrack {
+		return nil
 	}
-	s.mu.Lock()
-	s.queuedForID, s.lastQueued, s.lastError = playback.Item.ID, name, ""
-	s.mu.Unlock()
-	log.Printf("Spotify queued %q for %s mood", name, mood)
-	return nil
+	return s.playPlaylist(ctx, pendingMood, pendingPlaylist)
 }
 
 func (s *spotifyController) run(ctx context.Context) {

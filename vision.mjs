@@ -92,5 +92,17 @@ export function alienEye(centre, length, height, tilt, outward = 1, samples = 26
   top.push(place(along, -reach));
   bottom.push(place(along, reach));
  }
- return [...top, ...bottom.reverse()];
+ const shape = [...top, ...bottom.reverse()];
+ // The lopsided profile carries more area toward the broad outer corner, so
+ // its construction origin is not its visual centre. Translate the completed
+ // polygon to put the tracked human eye at the actual centre of the black eye.
+ let area = 0, x = 0, y = 0;
+ for (let index = 0; index < shape.length; index += 1) {
+  const a = shape[index], b = shape[(index + 1) % shape.length];
+  const cross = a.x * b.y - b.x * a.y;
+  area += cross; x += (a.x + b.x) * cross; y += (a.y + b.y) * cross;
+ }
+ if (Math.abs(area) < Number.EPSILON) return shape;
+ const visual = { x: x / (3 * area), y: y / (3 * area) };
+ return shape.map(point => ({ x: point.x + centre.x - visual.x, y: point.y + centre.y - visual.y }));
 }
