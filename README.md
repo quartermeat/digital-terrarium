@@ -192,7 +192,10 @@ animating past what was really sampled. `idle`, `waiting`, and `error`
 describe a condition rather than an event — a "waiting for direction" report
 stays valid indefinitely, since the agent really is still sitting there, until
 a fresh report supersedes it or the source deletes its own file (a `SessionEnd`
-hook, for example).
+hook, for example). For Claude and Codex hook reports with a `.watch.pid`
+sidecar, the bridge also verifies that the watcher process still belongs to
+that report. A dead watcher or a reused PID hides the fairy even if abrupt
+termination left an old waiting report behind.
 
 Adapters atomically publish one bounded JSON file per agent in
 `~/.local/state/digital-terrarium/agents/`. The schema contains only version, ID,

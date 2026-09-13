@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,6 +31,34 @@ type AgentActivity struct {
 
 var safeAgentField = regexp.MustCompile(`^[a-zA-Z0-9_. /:@+-]{0,96}$`)
 var safeAgentID = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,48}$`)
+
+// Hook reports can outlive a watcher killed without running its cleanup.
+// Verify ownership as well as PID existence, since Linux reuses process IDs.
+// Publishers without watcher sidecars retain the source-neutral protocol.
+func agentWatcherAlive(agentPath, agentID, procDirectory string) bool {
+	data, err := os.ReadFile(strings.TrimSuffix(agentPath, ".json") + ".watch.pid")
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return false
+	}
+	command, err := os.ReadFile(filepath.Join(procDirectory, strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false
+	}
+	args := bytes.Split(bytes.TrimSuffix(command, []byte{0}), []byte{0})
+	if len(args) != 6 {
+		return false
+	}
+	script := filepath.Base(string(args[1]))
+	return (script == "claude-activity-hook.py" || script == "codex-activity-hook.py") &&
+		string(args[2]) == "--watch" && string(args[3]) == agentPath && string(args[5]) == agentID
+}
 
 func validAgent(a AgentActivity, now time.Time) bool {
 	age := now.Sub(a.SampledAt)
@@ -74,7 +105,7 @@ func readAgentActivities(directory string, now time.Time) []AgentActivity {
 		var activity AgentActivity
 		err = json.NewDecoder(io.LimitReader(file, 8192)).Decode(&activity)
 		file.Close()
-		if err == nil && validAgent(activity, now) {
+		if err == nil && validAgent(activity, now) && agentWatcherAlive(filepath.Join(directory, entry.Name()), activity.ID, "/proc") {
 			out = append(out, activity)
 		}
 	}
