@@ -142,11 +142,22 @@ app.whenReady().then(async () => {
  await pause(900);
  assert.equal(await dataset('head'),'false');
  // A failed bridge must visibly become stale rather than invent activity.
+ // The scrubber is the only body in the tank that is not a process. It must
+ // appear exactly when something is abandoned, report the same sweep the
+ // bridge found, and never feed unless the bridge armed it.
+ for(let i=0;i<40;i++) {if(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.orphans!==undefined"))break;await pause(150);}
+ const sweep=await (await fetch(url+'/api/orphans')).json();
+ const seen=Number(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.orphans"));
+ assert.equal(seen,sweep.orphans.length,'the scene must show the sweep the bridge sent it');
+ assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.scrubber"),String(seen>0),'the scrubber exists only while something is dead');
+ assert.equal(sweep.auto,false,'killing must stay disarmed unless explicitly enabled');
+ assert.equal((await fetch(url+'/api/scrub')).status,405,'a sweep must not be reachable by navigation');
+ const scrubbing={orphans:seen,reclaimableBytes:sweep.reclaimableBytes,armed:sweep.auto};
  fs.writeFileSync('/tmp/digital-terrarium-scene.png',(await window.webContents.capturePage()).toPNG());
  bridge.kill();await pause(3500);
  assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').dataset.fresh"),'false');
  const unexpected=errors.filter(message=>!message.includes('ERR_CONNECTION_REFUSED')&&!message.includes('Failed to fetch'));
  assert.deepEqual(unexpected,[]);
- console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,grey:{hidden:true,revealed:true,...grey,expires:true,screenshot:'/tmp/digital-terrarium-head.png'},processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
+ console.log(JSON.stringify({scene,motion,hover:true,stale:true,agent:true,grey:{hidden:true,revealed:true,...grey,expires:true,screenshot:'/tmp/digital-terrarium-head.png'},scrubbing,processGroups:data.processes.length,interfaces:data.network.length,filesystems:data.disks.length,screenshot:'/tmp/digital-terrarium-scene.png'},null,2));
  clearTimeout(timeout);finish(0);
 }).catch(error=>{console.error(error);clearTimeout(timeout);finish(1);});

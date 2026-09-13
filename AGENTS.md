@@ -12,6 +12,27 @@ face it sees to `/tmp/digital-terrarium-face.json`, which
 `npm run head:replay -- 0.30` then replays at the primary display's own aspect.
 See README.md for detail.
 
+## The scrubber
+
+`scrubber.go` decides what counts as abandoned, and the rule is deliberately
+narrow: a process whose command line points into an agent scratchpad that no
+living agent process holds a descriptor under. Two false positives it must keep
+avoiding, both real cases on this machine:
+
+- a live server holding *inherited* descriptors under a long-dead session, which
+  is why only agent processes may establish a claim;
+- a group that is only part dead, which is why rot is a share and not a verdict.
+
+It signals supervisors only, with `SIGTERM`, at an evidence score of at least
+0.85, and lets their own shutdown reap children. Scores combine scratchpad use,
+reparenting, listening TCP sockets, and process age; supervisors can inherit a
+child's score. Age is process lifetime, not time since the owning session ended.
+Automatic termination is disarmed unless `TERRARIUM_SCRUB_AUTO=1` is set on the
+bridge; manual POST cleanup is independent. Salvage remains available unarmed.
+Motes use sampled RSS and are credited before confirmed exit; do not describe
+the ledger as verified physical memory recovery. See README.md for limitations.
+`./bin/digital-terrarium --orphans` prints the sweep without killing anything.
+
 ## Known problems
 
 ### A stale bridge is silently reused, so a deploy can serve old code

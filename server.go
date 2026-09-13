@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -18,10 +19,11 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 		log.Print(err)
 	}
 }
+
 // One stream replaces three polling loops. Each source keeps its own cadence,
 // so the viewer sees telemetry at the rate it is actually sampled rather than
 // at whatever rate a client happened to ask.
-func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visionHub) http.HandlerFunc {
+func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visionHub, scrub *scrubber) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -55,8 +57,13 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visio
 		defer sound.Stop()
 		sight := time.NewTicker(50 * time.Millisecond)
 		defer sight.Stop()
+		// Ownership changes when a session ends, not frame to frame, so the
+		// orphan sweep runs far slower than the feeds that describe movement.
+		orphans := time.NewTicker(5 * time.Second)
+		defer orphans.Stop()
 		if !send("ecosystem", snapshot()) || !send("agents", agentActivityPayload()) ||
-			!send("audio", audio.frameNow()) || !send("vision", vision.frameNow()) {
+			!send("audio", audio.frameNow()) || !send("vision", vision.frameNow()) ||
+			!send("orphans", scrub.payload()) {
 			return
 		}
 		for {
@@ -79,6 +86,10 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visio
 				if !send("vision", vision.frameNow()) {
 					return
 				}
+			case <-orphans.C:
+				if !send("orphans", scrub.payload()) {
+					return
+				}
 			}
 		}
 	}
@@ -87,6 +98,16 @@ func streamHandler(snapshot func() Ecosystem, audio *audioMonitor, vision *visio
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--fullscreen-state" {
 		if err := json.NewEncoder(os.Stdout).Encode(desktopFullscreenState()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	// A machine-readable sweep that kills nothing, so the rule that decides
+	// what counts as abandoned can be audited without starting the scene.
+	if len(os.Args) == 2 && os.Args[1] == "--orphans" {
+		home, _ := os.UserHomeDir()
+		probe := newScrubber("/proc", os.Getuid(), newLedger(filepath.Join(home, ".local", "state", "digital-terrarium", "ledger.json")))
+		if err := json.NewEncoder(os.Stdout).Encode(probe.payload()); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -106,13 +127,20 @@ func main() {
 	audio := &audioMonitor{}
 	go audio.run(spotifyContext)
 	vision := &visionHub{}
+	home, _ := os.UserHomeDir()
+	motes := newLedger(filepath.Join(home, ".local", "state", "digital-terrarium", "ledger.json"))
+	scrub := newScrubber("/proc", os.Getuid(), motes)
 	mux.HandleFunc("/api/audio", audio.serve)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"app": "digital-terrarium", "telemetryVersion": 1, "version": bridgeVersion()})
 	})
 	mux.HandleFunc("/api/ecosystem", collector.serve)
 	mux.HandleFunc("/api/agents", agentActivityHandler)
-	mux.HandleFunc("/api/stream", streamHandler(collector.current, audio, vision))
+	mux.HandleFunc("/api/stream", streamHandler(collector.current, audio, vision, scrub))
+	mux.HandleFunc("/api/orphans", scrub.serveOrphans)
+	mux.HandleFunc("/api/scrub", scrub.serveScrub)
+	mux.HandleFunc("/api/salvage", scrub.serveSalvage)
+	mux.HandleFunc("/api/motes", motes.serve)
 	mux.HandleFunc("/api/vision", vision.serve)
 	mux.HandleFunc("/api/vision-model", visionModelHandler)
 	mux.HandleFunc("/api/spotify/status", spotify.serveStatus)
@@ -124,7 +152,7 @@ func main() {
 	// stale copy of one module against a fresh copy of another fails to link
 	// the graph at all, and the scene silently never starts.
 	for _, name := range []string{"terrarium.html", "terrarium.mjs", "agent-activity.mjs", "ecology.mjs",
-		"vision.html", "vision-source.mjs", "vision.mjs", "vision-topology.mjs"} {
+		"vision.html", "vision-source.mjs", "vision.mjs", "vision-topology.mjs", "scrubber.mjs"} {
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			http.ServeFile(w, r, name)

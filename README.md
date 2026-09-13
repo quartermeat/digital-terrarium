@@ -45,6 +45,9 @@ cover crop; slideshows and per-monitor wallpaper selection are not implemented.
 | Electrolyte pool | RAM usage, memory pressure, swap, speaker audio | Fill and rim color follow RAM usage. Lines ripple with the playing waveform and bass, alongside memory stalls and swap traffic. |
 | Circuit root | Mounted local filesystem | Color and height reflect unavailable space. Pulses follow measured block-device reads/writes. |
 | Network port | A non-loopback network interface | Cyan bubbles descend for received bytes; amber bubbles rise for transmitted bytes. |
+| Rot | The share of a process group abandoned by a dead agent session | Colour drains from teal toward rust, a dashed arc covers the dead share, and rust specks fall from the body. |
+| Scrubber | Nothing: the only body in the tank that is not a process | Appears only while something is abandoned, swims to the deadest body, and consumes it when armed. |
+| Motes | Whole mebibytes of sampled RSS credited by reclaim or salvage | Gold specks burst from the corpse; the balance burns down to light the habitat. |
 
 Motion paths and entity placement supply personality. Brightness, movement
 activity, size, and emission rates are derived from measurements. Sparks and
@@ -285,6 +288,73 @@ not replay startup playback, because the bridge records that in
 
 Ollama may remain available independently for on-demand local inference. The
 graphical terrarium follows the desktop session.
+
+## The scrubber and motes
+
+Stillness is not death. A resting creature is a real process at zero CPU, and
+most of a desktop at rest looks exactly like that; meanwhile a session that died
+mid-flight can leave a server behind at 7% CPU, which renders as one of the
+liveliest bodies in the tank. Activity cannot tell you which is garbage, so the
+scrubber does not guess from it.
+
+Abandonment is inferred from ownership signals. An agent
+session owns a scratchpad directory named after its own UUID, and proves it is
+still alive by holding a descriptor open under that path. A process still
+pointing at a scratchpad that no living agent claims is what remains when the
+session ends without tearing its work down.
+
+Inherited descriptors are not a claim. A server started from one session and
+outliving it keeps those descriptors open, and so does an unrelated sibling, so
+only an *agent* process's grip counts. This is what keeps a live companion
+server — which holds descriptors under a long-dead session — out of the sweep.
+
+A creature is a group of processes sharing a command name, so a group can be
+part dead: the same `factorio` that hosts a live save also hosted the one nobody
+owns. Only the dead share rots.
+
+```bash
+./bin/digital-terrarium --orphans   # machine-readable sweep; kills nothing
+curl -s http://127.0.0.1:8091/api/orphans
+```
+
+The scrubber signals supervisors only, and only ever with `SIGTERM`. `crewmate`
+traps it and runs its own shutdown, stopping the game politely before escalating
+after fifteen seconds; killing the child directly would skip that path and lose
+the save. Anything that refuses to leave is still there next sweep rather than
+being forced out.
+
+Confidence combines working in the unclaimed scratchpad (0.30), adoption by a
+reaper (0.15), a listening TCP socket (0.20), and process age (up to 0.35 over
+120 seconds). A supervisor can inherit its strongest child's score. The strike
+threshold is 0.85; this is a heuristic score, not a calibrated probability.
+Process age does not measure how long its agent session has been gone.
+
+**Motes** credit one mote per whole mebibyte of sampled RSS. Reclaim credits
+memory when SIGTERM is sent; it does not wait for confirmed exit. Salvage credits
+previously observed candidates that disappear from the orphan scan without
+having been signalled. Disappearance does not independently prove exit, and RSS
+can count shared pages more than once, so the balance is not a measurement of
+physical RAM actually freed. Reclaim draws an outward amber strike; salvage
+draws quiet inward rings and can run while automatic termination is disarmed.
+The habitat spends motes to bloom, gradually fading as the balance runs down.
+The balance survives restarts in
+`~/.local/state/digital-terrarium/ledger.json`.
+
+Automatic killing is disarmed by default: an unarmed tank
+shows the rot and lets the scrubber circle it without feeding. Arm it on the
+bridge, not in the scene:
+
+```bash
+systemctl --user set-environment TERRARIUM_SCRUB_AUTO=1
+systemctl --user restart terrarium-mood.service
+curl -s -X POST http://127.0.0.1:8091/api/scrub   # or sweep once, by hand
+```
+
+The manual POST requests cleanup independently of the automatic setting.
+To watch a disposable process be reclaimed, run
+`python3 scripts/scrub-demo.py --linger` (normally about 69 seconds to the
+threshold, plus sweep and animation time). Use `--die 20` to demonstrate
+salvage instead. Both default to 192 MiB; `--megabytes` changes the allocation.
 
 ## The grey
 

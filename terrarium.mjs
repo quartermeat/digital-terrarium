@@ -2,12 +2,15 @@ import { CAPACITY, emptyCreature, syncGroups, prepareCreature, emissionRate, ste
 import { agentFresh, agentWaypoints } from './agent-activity.mjs';
 import { visionFresh, faceWireOpacity, aspectScale, correctPoints, centroid, greyHead, alienEye } from './vision.mjs';
 import { FACE_RINGS } from './vision-topology.mjs';
+import { orphanShare, deadConfidence, approachRadius, chooseScrubTarget, stepScrubber, beginStrike, stepStrike, emptyScrubber, moteCount, bloomBurn, bloomLevel, KILL_CONFIDENCE } from './scrubber.mjs';
 
 const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
 const tooltip = document.querySelector('#tooltip');
 const creatures = Array.from({ length: CAPACITY }, emptyCreature);
 let snapshot = null, pending = null, networkError = false, pointer = null;
 let agents = [], agentError = false;
+let orphanGroups = {}, orphanCount = 0, motes = 0, scrubbing = false, bloomPending = 0, bloomOwed = 0, scrubArmed = false, salvageBytes = 0;
+const scrubber = emptyScrubber();
 let vision = null;
 let audio = null, audioReceived = 0, musicLevel = 0, musicBass = 0, musicPhase = 0;
 const musicWave = Array(40).fill(0);
@@ -36,6 +39,18 @@ stream.addEventListener('agents', event => {
   agents = data.agents; agentError = false;
  } catch { agentError = true; }
 });
+// Ownership, unlike movement, only changes when a session ends, so this feed
+// arrives slowly and is held until superseded rather than expiring on a timer.
+stream.addEventListener('orphans', event => {
+ try {
+  const data = JSON.parse(event.data);
+  if (data.version !== 1 || typeof data.groups !== 'object' || !data.groups) throw Error('Incompatible orphan sweep');
+  orphanGroups = data.groups; orphanCount = Array.isArray(data.orphans) ? data.orphans.length : 0;
+  motes = Number.isFinite(data.balance) ? data.balance : motes;
+  scrubArmed = data.auto === true;
+  salvageBytes = Number.isFinite(data.salvageBytes) ? data.salvageBytes : 0;
+ } catch { orphanGroups = {}; orphanCount = 0; salvageBytes = 0; }
+});
 stream.addEventListener('vision', event => {
  try {
   const data = JSON.parse(event.data);
@@ -52,7 +67,7 @@ stream.addEventListener('audio', event => {
 });
 // EventSource reconnects on its own; until it does, the scene goes stale rather
 // than holding the last reading as though it were current.
-stream.addEventListener('error', () => { networkError = true; agentError = true; audio = null; vision = null; });
+stream.addEventListener('error', () => { networkError = true; agentError = true; audio = null; vision = null; orphanGroups = {}; orphanCount = 0; salvageBytes = 0; });
 function resize() {
  width = innerWidth; height = innerHeight;
  const ratio = Math.min(devicePixelRatio, 2);
@@ -157,8 +172,12 @@ function drawCreature(c,fresh,hits,dt) {
  if(!c.group)return;
  const x=c.x*width,y=c.y*height,s=c.size;
  const valid=fresh&&measured(c.group.cpu);
+ const rot=orphanShare(c.group,orphanGroups);
  ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(Math.sin(c.heading)*height,Math.cos(c.heading)*width));ctx.globalAlpha=c.alpha;
- const color=valid?'hsl('+c.hue+' 55% '+(40+c.level*40)+'%)':'#687b7a';
+ // Abandonment is not stillness, so it cannot be drawn as stillness: the
+ // dead share drains the body's colour toward rust instead of freezing it.
+ const hue=c.hue-(c.hue-18)*rot, saturation=55-38*rot;
+ const color=valid?'hsl('+hue+' '+saturation+'% '+(40+c.level*40)+'%)':'#687b7a';
  // Compact floating chip: a single body and status bars, with no animal-like legs.
  // Stacked outlines behind it count the processes sharing the group name.
  ctx.strokeStyle=color;ctx.lineWidth=1.2;
@@ -181,9 +200,117 @@ function drawCreature(c,fresh,hits,dt) {
  ctx.globalAlpha=1;ctx.fillStyle=color;
  const pitch=s*1.2/c.bars;
  for(let i=0;i<c.bars;i++)ctx.fillRect(-s*.5+i*pitch,-s*.12,Math.max(1.2,pitch*.55),s*.24);
+ // A broken arc over the share of the group that no living session owns.
+ if(rot>0){
+  ctx.globalAlpha=.9;ctx.strokeStyle='hsl(18 70% 58%)';ctx.lineWidth=2;ctx.setLineDash([3,3]);
+  ctx.beginPath();ctx.arc(0,0,s*.86,-Math.PI/2,-Math.PI/2+rot*Math.PI*2);ctx.stroke();
+  ctx.setLineDash([]);ctx.lineWidth=1.2;
+ }
  ctx.restore();
  if(valid)emit('cpu:'+c.group.name,c.level*2,dt,()=>({x,y,vx:0,vy:-12,life:.7,color:'#9ef5b9',kind:'spark'}));
- hits.push({x,y,rx:s+8,ry:s+8,text:c.group.name+' / '+c.group.count+' processes\nCPU '+percent(c.group.cpu)+' of whole machine\nRSS sum '+bytes(c.group.rssBytes)+' (shared pages may repeat)\nThreads '+c.group.threads+' · runnable '+c.group.running+'\n'+(!valid?'Waiting for measurements':c.level>0?'Active':'Resting')});
+ // Rot sheds regardless of activity: this is the one emission that does not
+ // depend on the group doing anything, because being abandoned is not an act.
+ if(rot>0)emit('rot:'+c.group.name,rot*3,dt,()=>({x:x+(Math.random()-.5)*s,y,vx:(Math.random()-.5)*8,vy:14,life:1.4,color:'hsl(18 65% 55%)',kind:'spark'}));
+ hits.push({x,y,rx:s+8,ry:s+8,text:c.group.name+' / '+c.group.count+' processes\nCPU '+percent(c.group.cpu)+' of whole machine\nRSS sum '+bytes(c.group.rssBytes)+' (shared pages may repeat)\nThreads '+c.group.threads+' · runnable '+c.group.running+'\n'+(!valid?'Waiting for measurements':c.level>0?'Active':'Resting')+(rot>0?'\nABANDONED '+orphanGroups[c.group.name].dead+' of '+c.group.count+': holding a session that ended'+'\nDead with '+Math.round(deadConfidence(c.group,orphanGroups)*100)+'% confidence':'')});
+}
+// The scrubber is the one body in the tank that is not a process. It exists
+// only while something is abandoned, it consumes what the sweep proved dead,
+// and it is what turns reclaimed memory into motes.
+function burstMotes(amount,color) {
+ const specks=moteCount(amount);
+ for(let i=0;i<specks;i++)particles.push({x:scrubber.x*width,y:scrubber.y*height,
+  vx:(Math.random()-.5)*50,vy:-30-Math.random()*50,life:2.6,color,kind:'mote'});
+}
+// A kill. The strike begins on the frame the decision is made rather than when
+// the bridge answers, so what you watch is the killer committing, not a
+// round trip completing.
+function consumeCorpse() {
+ if(scrubbing||!scrubArmed)return;
+ scrubbing=true;
+ beginStrike(scrubber,'reclaimed',0);
+ fetch('/api/scrub',{method:'POST'}).then(response=>response.json()).then(result=>{
+  if(Number.isFinite(result.balance))motes=result.balance;
+  if(scrubber.strike)scrubber.strike.amount=result.minted;
+  burstMotes(result.minted,'#ffd98a');
+ }).catch(()=>{}).finally(()=>{scrubbing=false;});
+}
+// Free currency. Nothing is killed here -- these bodies already left -- so it
+// needs no arming, and the animation is a gathering rather than a blow.
+function harvestSalvage() {
+ if(scrubbing||salvageBytes<=0)return;
+ scrubbing=true; salvageBytes=0;
+ beginStrike(scrubber,'salvaged',0);
+ fetch('/api/salvage',{method:'POST'}).then(response=>response.json()).then(result=>{
+  if(Number.isFinite(result.balance))motes=result.balance;
+  if(scrubber.strike)scrubber.strike.amount=result.minted;
+  burstMotes(result.minted,'#9fe8d0');
+ }).catch(()=>{}).finally(()=>{scrubbing=false;});
+}
+// The two acts must not look alike. A reclaim throws a hot ring outward and
+// breaks the body apart; a salvage draws quiet rings inward, because nothing
+// was taken from anything still living.
+function drawStrike(strike) {
+ if(!strike)return;
+ const x=scrubber.x*width,y=scrubber.y*height,t=Math.min(1,strike.t);
+ ctx.save();
+ if(strike.kind==='reclaimed'){
+  const r=10+t*72;
+  ctx.globalAlpha=(1-t)*.9;ctx.strokeStyle='#ffca7a';ctx.lineWidth=3*(1-t)+.6;
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();
+  ctx.globalAlpha=(1-t)*.5;ctx.strokeStyle='#fff3d6';
+  ctx.beginPath();ctx.arc(x,y,r*.58,0,Math.PI*2);ctx.stroke();
+  ctx.globalAlpha=(1-t)*.8;ctx.strokeStyle='#ffca7a';ctx.lineWidth=1.4;
+  for(let i=0;i<8;i++){
+   const a=i*Math.PI/4+t*1.6;
+   ctx.beginPath();ctx.moveTo(x+Math.cos(a)*r*.45,y+Math.sin(a)*r*.45);
+   ctx.lineTo(x+Math.cos(a)*r,y+Math.sin(a)*r);ctx.stroke();
+  }
+ } else {
+  ctx.strokeStyle='#9fe8d0';ctx.lineWidth=1.4;
+  for(let i=0;i<3;i++){
+   const p=Math.min(1,Math.max(0,t*1.4-i*.18)),r=48*(1-p)+6;
+   ctx.globalAlpha=(1-p)*.5;
+   ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();
+  }
+ }
+ ctx.restore();ctx.globalAlpha=1;
+}
+function spendBloom(amount) {
+ fetch('/api/motes',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({amount,reason:'habitat bloom'})})
+  .then(response=>response.json()).then(result=>{if(Number.isFinite(result.balance))motes=result.balance;}).catch(()=>{});
+}
+function drawScrubber(hits,dt) {
+ if(scrubber.alpha<=.01)return;
+ const x=scrubber.x*width,y=scrubber.y*height,s=13;
+ ctx.save();ctx.translate(x,y);ctx.globalAlpha=scrubber.alpha;
+ // Bristles: the one organism here that reads as alive rather than mechanical,
+ // because it is the only one doing something to the tank rather than in it.
+ ctx.strokeStyle='#bdfff0';ctx.lineWidth=1.1;
+ for(let i=0;i<10;i++){
+  const a=scrubber.phase*.5+i*Math.PI/5,r=s*(.62+.24*Math.sin(scrubber.phase*2+i));
+  ctx.beginPath();ctx.moveTo(Math.cos(a)*s*.44,Math.sin(a)*s*.44);ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);ctx.stroke();
+ }
+ ctx.fillStyle='#0d3b3a';ctx.strokeStyle='#e8fffb';ctx.lineWidth=1.6;
+ ctx.beginPath();ctx.arc(0,0,s*.42,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#e8fffb';ctx.globalAlpha=scrubber.alpha*(.55+.45*Math.sin(scrubber.phase*3));
+ ctx.beginPath();ctx.arc(0,0,s*.17,0,Math.PI*2);ctx.fill();
+ ctx.restore();ctx.globalAlpha=1;
+ hits.push({x,y,rx:s+10,ry:s+10,text:'SCRUBBER\n'+orphanCount+' abandoned process'+(orphanCount===1?'':'es')+' in the tank'
+  +(scrubber.target?'\nStalking '+scrubber.target+' at '+Math.round(scrubber.confidence*100)+'% confidence'
+    +(scrubber.confidence>=KILL_CONFIDENCE?' (sure enough to strike)':' (holding off)'):'\nNothing to consume')
+  +'\nMotes '+Math.round(motes)+(salvageBytes>0?'\nSalvage waiting: '+bytes(salvageBytes):'')
+  +(scrubArmed?'':'\nNot armed: it may salvage, but never kill')});
+}
+// Light the tank earned. A balance that is never replenished burns down to
+// dark on its own, so a clean machine is a bright one.
+function drawBloom() {
+ const level=bloomLevel(motes);
+ if(level<=.01)return;
+ const glow=ctx.createRadialGradient(width/2,height*.55,0,width/2,height*.55,Math.max(width,height)*.7);
+ glow.addColorStop(0,'rgba(150,255,226,'+(level*.09).toFixed(3)+')');
+ glow.addColorStop(1,'rgba(150,255,226,0)');
+ ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
 }
 function hover(hits,fresh) {
  if(!pointer){tooltip.style.display='none';return;}
@@ -358,10 +485,22 @@ function drawGrey(face,hits,dt) {
 }
 function frame(stamp) {
  const dt=Math.min((stamp-last)/1000||0,.05);last=stamp;time+=dt;
- if(pending){snapshot=pending;pending=null;syncGroups(creatures,snapshot.processes);const allowed=new Set([...snapshot.processes.map(g=>'cpu:'+g.name),...snapshot.network.flatMap(n=>[n.name+'rx',n.name+'tx'])]);for(const key of accumulators.keys())if(!allowed.has(key))accumulators.delete(key);}
+ if(pending){snapshot=pending;pending=null;syncGroups(creatures,snapshot.processes);const allowed=new Set([...snapshot.processes.map(g=>'rot:'+g.name),...snapshot.processes.map(g=>'cpu:'+g.name),...snapshot.network.flatMap(n=>[n.name+'rx',n.name+'tx'])]);for(const key of accumulators.keys())if(!allowed.has(key))accumulators.delete(key);}
  const fresh=!!snapshot&&!networkError&&Date.now()-Date.parse(snapshot.sampledAt)<5000;
  creatures.forEach(c=>prepareCreature(c,dt,fresh));
  stepCreatures(creatures,dt,time);
+ const corpse=chooseScrubTarget(scrubber,creatures,orphanGroups);
+ const certainty=corpse?deadConfidence(corpse.group,orphanGroups):0;
+ const committed=stepScrubber(scrubber,corpse,certainty,dt);
+ if(!scrubber.strike){
+  if(committed)consumeCorpse();
+  else if(salvageBytes>0)harvestSalvage();
+ }
+ const strike=stepStrike(scrubber,dt);
+ // The habitat burns its balance down in whole motes, batched so the bloom
+ // does not talk to the bridge every other frame.
+ const burn=bloomBurn(bloomPending,motes,dt);bloomPending=burn.pending;bloomOwed+=burn.spend;
+ if(bloomOwed>=5){const owed=bloomOwed;bloomOwed=0;motes=Math.max(0,motes-owed);spendBloom(owed);}
  const face=visionSpace();
  // Redraw the wallpaper every frame; alpha clearing alone caused desktop trails.
  ctx.clearRect(0,0,width,height);
@@ -375,6 +514,7 @@ function frame(stamp) {
  drawMemory(fresh,hits,dt);drawRoots(fresh,hits,dt);drawNetwork(fresh,hits,dt);
  creatures.forEach(c=>drawCreature(c,fresh,hits,dt));
  agents.forEach((agent,index)=>drawAgent(agent,index,hits,dt));
+ drawScrubber(hits,dt);drawStrike(strike);
  if(face)drawGrey(face,hits,dt);
  for(const id of operatorStates.keys())if(!agents.some(agent=>agent.id===id))operatorStates.delete(id);
  for(let i=particles.length-1;i>=0;i--) {
@@ -383,14 +523,21 @@ function frame(stamp) {
   ctx.globalAlpha=Math.min(1,p.life);
    if(p.kind==='bubble'){ctx.strokeStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.stroke();}
    else if(p.kind==='code'){ctx.fillStyle=p.color;ctx.font='8px monospace';ctx.fillText(Math.random()>.5?'1':'0',p.x,p.y);}
+   else if(p.kind==='mote'){ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,1.8,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=Math.min(1,p.life)*.35;ctx.beginPath();ctx.arc(p.x,p.y,4.2,0,Math.PI*2);ctx.fill();}
   else {ctx.fillStyle=p.color;ctx.fillRect(p.x-1,p.y-1,2,2);}
  }
- ctx.globalAlpha=1;hover(hits,fresh);
+ ctx.globalAlpha=1;drawBloom();hover(hits,fresh);
  // Machine-readable diagnostics for local verification; no permanent HUD.
  canvas.dataset.ready='true';canvas.dataset.fresh=String(fresh);
  canvas.dataset.creatures=String(creatures.filter(c=>c.group).length);
  canvas.dataset.agentCount=String(agentError?0:agents.filter(agent=>agentFresh(agent)).length);
  canvas.dataset.head=String(!!face&&faceWireOpacity(face.span)>0);
+ canvas.dataset.orphans=String(orphanCount);
+ canvas.dataset.motes=String(Math.round(motes));
+ canvas.dataset.scrubber=String(scrubber.alpha>.01);
+ canvas.dataset.scrubConfidence=String(Math.round(scrubber.confidence*100));
+ canvas.dataset.strike=scrubber.strike?scrubber.strike.kind:'';
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
