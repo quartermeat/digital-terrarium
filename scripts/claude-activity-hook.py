@@ -58,7 +58,7 @@ def watch_pid_path(agent_path):
     return agent_path.with_suffix(".watch.pid")
 
 
-def publish(agent_path, agent_id, phase, detail, target):
+def publish(agent_path, agent_id, phase, detail, target, origin="event"):
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     activity = {
         "version": 1,
@@ -67,6 +67,7 @@ def publish(agent_path, agent_id, phase, detail, target):
         "sampledAt": stamp,
         "phase": phase,
         "detail": detail,
+        "report_origin": origin,
     }
     if target.get("name"):
         activity["target"] = target
@@ -182,7 +183,7 @@ def watch_forever(agent_path, host, agent_id):
             if report is None:
                 mine = None
             else:
-                mine = publish(agent_path, agent_id, *report)
+                mine = publish(agent_path, agent_id, *report, origin="watchdog")
             time.sleep(WATCH_INTERVAL)
     finally:
         agent_path.unlink(missing_ok=True)

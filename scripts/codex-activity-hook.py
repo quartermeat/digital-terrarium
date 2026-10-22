@@ -49,7 +49,7 @@ def watch_pid_path(agent_path):
     return agent_path.with_suffix(".watch.pid")
 
 
-def publish(agent_path, agent_id, phase, detail, target):
+def publish(agent_path, agent_id, phase, detail, target, origin="event"):
     activity = {
         "version": 1,
         "id": agent_id,
@@ -57,6 +57,7 @@ def publish(agent_path, agent_id, phase, detail, target):
         "sampledAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "phase": phase,
         "detail": detail,
+        "report_origin": origin,
     }
     if target.get("name"):
         activity["target"] = target
@@ -140,7 +141,7 @@ def watch_forever(agent_path, host, agent_id):
             # never blinks out between a report expiring and idle replacing
             # it. Never overwrites a fresh report, never invents activity.
             if stale:
-                publish(agent_path, agent_id, "waiting", "ready for direction", {})
+                publish(agent_path, agent_id, "waiting", "ready for direction", {}, "watchdog")
             time.sleep(WATCH_INTERVAL)
     finally:
         agent_path.unlink(missing_ok=True)
